@@ -1757,7 +1757,7 @@ if [[ "$REUSE_PRIVATE_KEY" != "true" ]]; then
    rm -f "$DOMAIN_DIR/${DOMAIN}.key"
   fi
   if [[ -s "$DOMAIN_DIR/${DOMAIN}.ec.key" ]]; then
-   rm -f "$DOMAIN_DIR/${DOMAIN}.ecs.key"
+   rm -f "$DOMAIN_DIR/${DOMAIN}.ec.key"
   fi
 fi
 # create new domain keys if they don't already exist
