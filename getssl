@@ -1322,6 +1322,7 @@ write_domain_template() { # write out a template file for a domain.
     #CA_CERT_LOCATION="/etc/ssl/chain.crt"
     #DOMAIN_CHAIN_LOCATION="" # this is the domain cert and CA cert
     #DOMAIN_PEM_LOCATION="" # this is the domain_key, domain cert and CA cert
+    #DOMAIN_KEY_CERT_LOCATION="" # this is the domain_key and domain cert
 
     ## The command needed to reload apache / nginx or whatever you use
     #RELOAD_CMD=""
