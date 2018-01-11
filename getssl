@@ -245,7 +245,7 @@ ORIGCMD="$0 $*"
 # Define all functions (in alphabetical order)
 
 cert_archive() {  # Archive certificate file by copying files to dated archive dir.
-  debug "creating an achive copy of current new certs"
+  debug "creating an archive copy of current new certs"
   date_time=$(date +%Y_%m_%d_%H_%M)
   mkdir -p "${DOMAIN_DIR}/archive/${date_time}"
   umask 077
@@ -1709,7 +1709,7 @@ if [[ -s "$CERT_FILE" ]]; then
     if [[ $(date_renew) -lt "$enddate_s" ]] && [[ $_FORCE_RENEW -ne 1 ]]; then
       issuer=$(openssl x509 -in "$CERT_FILE" -noout -issuer 2>/dev/null)
       if [[ "$issuer" == *"Fake LE Intermediate"* ]] && [[ "$CA" == "https://acme-v01.api.letsencrypt.org" ]]; then
-        debug "upgradeing from fake cert to real"
+        debug "upgrading from fake cert to real"
       else
         info "${DOMAIN}: certificate is valid for more than $RENEW_ALLOW days (until $enddate)"
         # everything is OK, so exit.
