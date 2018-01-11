@@ -506,6 +506,7 @@ copy_file_to_location() { # copies a file, using scp, sftp or ftp if required.
   cert=$1   # descriptive name, just used for display
   from=$2   # current file location
   to=$3     # location to move file to.
+  if [[ -n "$4" ]]; then chmod --reference="$4" "$from"; fi
   IFS=\; read -r -a copy_locations <<<"$3"
   for to in "${copy_locations[@]}"; do
     info "copying $cert to $to"
@@ -1693,11 +1694,13 @@ if [[ "${CHECK_REMOTE}" == "true" ]] && [[ $_FORCE_RENEW -eq 0 ]]; then
           cat "$DOMAIN_DIR/${DOMAIN}.key" "$CERT_FILE" > "$TEMP_DIR/${DOMAIN}_K_C.pem"
           copy_file_to_location "private key and domain cert pem" \
                                 "$TEMP_DIR/${DOMAIN}_K_C.pem"  \
-                                "$DOMAIN_KEY_CERT_LOCATION"
+                                "$DOMAIN_KEY_CERT_LOCATION"	\
+				"$DOMAIN_DIR/${DOMAIN}.key"
           cat "$DOMAIN_DIR/${DOMAIN}.key" "$CERT_FILE" "$CA_CERT" > "$TEMP_DIR/${DOMAIN}.pem"
           copy_file_to_location "full pem" \
                                 "$TEMP_DIR/${DOMAIN}.pem"  \
-                                "$DOMAIN_PEM_LOCATION"
+                                "$DOMAIN_PEM_LOCATION"	\
+				"$DOMAIN_DIR/${DOMAIN}.key"
           reload_service
         fi
       else
@@ -2095,10 +2098,10 @@ if [[ ! -z "$DOMAIN_CHAIN_LOCATION" ]]; then
     to_location="${DOMAIN_CHAIN_LOCATION}"
   fi
   cat "$CERT_FILE" "$CA_CERT" > "$TEMP_DIR/${DOMAIN}_chain.pem"
-  copy_file_to_location "full chain" "$TEMP_DIR/${DOMAIN}_chain.pem"  "$to_location"
+  copy_file_to_location "full chain" "$TEMP_DIR/${DOMAIN}_chain.pem"  "$to_location" "$CERT_FILE"
   if [[ "$DUAL_RSA_ECDSA" == "true" ]]; then
     cat "${CERT_FILE::-4}.ec.crt" "${CA_CERT::-4}.ec.crt" > "$TEMP_DIR/${DOMAIN}_chain.pem.ec"
-    copy_file_to_location "full chain" "$TEMP_DIR/${DOMAIN}_chain.pem.ec"  "${to_location}.ec"
+    copy_file_to_location "full chain" "$TEMP_DIR/${DOMAIN}_chain.pem.ec"  "${to_location}.ec" "${CERT_FILE::-4}.ec.crt"
   fi
 fi
 # if DOMAIN_KEY_CERT_LOCATION is not blank, then create and copy file.
@@ -2109,10 +2112,10 @@ if [[ ! -z "$DOMAIN_KEY_CERT_LOCATION" ]]; then
     to_location="${DOMAIN_KEY_CERT_LOCATION}"
   fi
   cat "$DOMAIN_DIR/${DOMAIN}.key" "$CERT_FILE" > "$TEMP_DIR/${DOMAIN}_K_C.pem"
-  copy_file_to_location "private key and domain cert pem" "$TEMP_DIR/${DOMAIN}_K_C.pem"  "$to_location"
+  copy_file_to_location "private key and domain cert pem" "$TEMP_DIR/${DOMAIN}_K_C.pem"  "$to_location" "$DOMAIN_DIR/${DOMAIN}.key"
   if [[ "$DUAL_RSA_ECDSA" == "true" ]]; then
-  cat "$DOMAIN_DIR/${DOMAIN}.ec.key" "${CERT_FILE::-4}.ec.crt" > "$TEMP_DIR/${DOMAIN}_K_C.pem.ec"
-  copy_file_to_location "private ec key and domain cert pem" "$TEMP_DIR/${DOMAIN}_K_C.pem.ec"  "${to_location}.ec"
+    cat "$DOMAIN_DIR/${DOMAIN}.ec.key" "${CERT_FILE::-4}.ec.crt" > "$TEMP_DIR/${DOMAIN}_K_C.pem.ec"
+    copy_file_to_location "private ec key and domain cert pem" "$TEMP_DIR/${DOMAIN}_K_C.pem.ec"  "${to_location}.ec" "$DOMAIN_DIR/${DOMAIN}.ec.key"
   fi
 fi
 # if DOMAIN_PEM_LOCATION is not blank, then create and copy file.
@@ -2123,10 +2126,10 @@ if [[ ! -z "$DOMAIN_PEM_LOCATION" ]]; then
     to_location="${DOMAIN_PEM_LOCATION}"
   fi
   cat "$DOMAIN_DIR/${DOMAIN}.key" "$CERT_FILE" "$CA_CERT" > "$TEMP_DIR/${DOMAIN}.pem"
-  copy_file_to_location "full key, cert and chain pem" "$TEMP_DIR/${DOMAIN}.pem"  "$to_location"
+  copy_file_to_location "full key, cert and chain pem" "$TEMP_DIR/${DOMAIN}.pem"  "$to_location" "$DOMAIN_DIR/${DOMAIN}.key"
   if [[ "$DUAL_RSA_ECDSA" == "true" ]]; then
     cat "$DOMAIN_DIR/${DOMAIN}.ec.key" "${CERT_FILE::-4}.ec.crt" "${CA_CERT::-4}.ec.crt" > "$TEMP_DIR/${DOMAIN}.pem.ec"
-    copy_file_to_location "full ec key, cert and chain pem" "$TEMP_DIR/${DOMAIN}.pem.ec"  "${to_location}.ec"
+    copy_file_to_location "full ec key, cert and chain pem" "$TEMP_DIR/${DOMAIN}.pem.ec"  "${to_location}.ec" "$DOMAIN_DIR/${DOMAIN}.ec.key"
   fi
 fi
 # end of copying certs.
