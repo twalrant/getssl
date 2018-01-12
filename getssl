@@ -225,6 +225,7 @@ TOKEN_USER_ID=""
 USE_SINGLE_ACL="false"
 VALIDATE_VIA_DNS=""
 WORKING_DIR=~/.getssl
+WORKING_DIR_ONLY="false"
 _CHECK_ALL=0
 _CREATE_CONFIG=0
 _FORCE_RENEW=0
@@ -946,9 +947,9 @@ help_message() { # print out the help message
 	  -Q, --mute         Like -q, but mutes notification about successful upgrade
 	  -r, --revoke   "cert" "key" [CA_server] Revoke a certificate (the cert and key are required)
 	  -u, --upgrade      Upgrade getssl if a more recent version is available
-	  -k, --keep     "#" Maximum amount of old getssl versions to keep when upgrading
+	  -k, --keep "#"     Maximum amount of old getssl versions to keep when upgrading
 	  -U, --nocheck      Do not check if a more recent version is available
-	  -w working_dir "Working directory"
+	  -w working_dir     "Working directory"
 
 	_EOF_
 }
@@ -1315,6 +1316,10 @@ write_domain_template() { # write out a template file for a domain.
 
     ## Set USE_SINGLE_ACL="true" to use a single ACL for all checks
     #USE_SINGLE_ACL="false"
+
+    ## Set WORKING_DIR_ONLY="true" to disable files installation. Only
+    ## update working directory.
+    #WORKING_DIR_ONLY="false"
 
     ## Location for all your certs, these can either be on the server
     ## (full path name) or using ssh /sftp as for the ACL
@@ -2065,7 +2070,12 @@ fi
 # create Archive of new certs and keys.
 cert_archive
 
-debug "Certificates obtained and archived locally, will now copy to specified locations"
+if [[ "${WORKING_DIR_ONLY}" == "true" ]]; then
+    debug "Certificates obtained and archived locally (copy files disabled)."
+    graceful_exit
+else
+    debug "Certificates obtained and archived locally, will now copy to specified locations"
+fi
 
 # copy certs to the correct location (creating concatenated files as required)
 
