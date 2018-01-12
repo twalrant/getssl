@@ -1,0 +1,15 @@
+## List of command with full path - Linux
+CAT=/bin/cat
+CHMOD=/bin/chmod
+DATE=/bin/date
+DIFF=/usr/bin/diff
+ECHO=/bin/echo
+GREP=/bin/grep
+INSTALL=/usr/bin/install
+MKTEMP=/bin/mktemp
+OPENSSL=/usr/bin/openssl
+RM=/bin/rm
+STAT=/usr/bin/stat
+TOUCH=/usr/bin/touch
+UMASK=umask	# bash command
+UNAME=/bin/uname

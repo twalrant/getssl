@@ -1,0 +1,15 @@
+## List of command with full path - Cygwin
+CAT=/usr/bin/cat
+CHMOD=/usr/bin/chmod
+DATE=/usr/bin/date
+DIFF=/usr/bin/diff
+ECHO=/usr/bin/echo
+GREP=/usr/bin/grep
+INSTALL=/usr/bin/install
+MKTEMP=/usr/bin/mktemp
+OPENSSL=/usr/bin/openssl
+RM=/usr/bin/rm
+STAT=/usr/bin/stat
+TOUCH=/usr/bin/touch
+UMASK=umask	# bash command
+UNAME=/usr/bin/uname

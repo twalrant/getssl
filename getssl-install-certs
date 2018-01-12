@@ -1,0 +1,416 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# getssl-install-certs - subset utility of GetSSL - install available
+# certificates (obtained by 'getssl')
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+# For usage, run "getssl-install-certs -h"
+
+# Revision history:
+# 2018-01-12 Created (v0.1)
+# -----------------------------------------------------------------------------
+
+PROGNAME=${0##*/}
+VERSION="0.01"
+
+# defaults
+DOMAIN=
+INSTALL_CERT_MODE='-m 0644'
+INSTALL_CERT_OWNER='-o root -g root'
+INSTALL_KEY_MODE='-m 0600'
+INSTALL_KEY_OWNER='-o root -g root'
+ORIG_UMASK_CMD=$(umask -p)	# bash command
+WORKING_DIR=~/.getssl
+ORIG_CMD=$(readlink -f $0)
+
+_CHECK_ALL=0
+_FORCE=0
+_QUIET=0
+_TRUE=1
+_USE_DEBUG=0
+
+CAT=/bin/cat
+CHMOD=/bin/chmod
+DATE=/bin/date
+DIFF=/usr/bin/diff
+ECHO=/bin/echo
+GREP=/bin/grep
+INSTALL=/usr/bin/install
+MKTEMP=/bin/mktemp
+OPENSSL=/usr/bin/openssl
+RM=/bin/rm
+STAT=/usr/bin/stat
+TOUCH=/usr/bin/touch
+UMASK=umask	# bash command
+UNAME=/bin/uname
+
+# Define all functions (in alphabetical order)
+
+check_config() { # check the config files for all obvious errors
+    local config_errors=false
+
+    debug "checking config"
+
+    if [[ -z "${DOMAIN_CERT_LOCATION}" ]]; then
+        info "${DOMAIN}: DOMAIN_CERT_LOCATION not specified for domain in ${DOMAIN_DIR}/getssl.cfg"
+        config_errors=true
+    else
+        debug "checked DOMAIN_CERT_LOCATION "
+    fi
+
+    if [[ -z "${DOMAIN_KEY_LOCATION}" ]]; then
+        info "${DOMAIN}: DOMAIN_KEY_LOCATION not specified for domain in ${DOMAIN_DIR}/getssl.cfg"
+        config_errors=true
+    else
+        debug "checked DOMAIN_KEY_LOCATION "
+    fi
+
+    if [[ "${config_errors}" == "true" ]]; then
+        error_exit "${DOMAIN}: exiting due to config errors"
+    fi
+    debug "${DOMAIN}: check_config completed  - all OK"
+}
+
+clean_up() { # Perform pre-exit housekeeping
+    ${ORIG_UMASK_CMD}
+}
+
+debug() { # write out debug info if the debug flag has been set
+    if [[ ${_USE_DEBUG} -eq 1 ]]; then
+        ${ECHO} ""
+        ${ECHO} "$@"
+    fi
+}
+
+error_exit() { # give error message on error exit
+    ${ECHO} -e "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+    clean_up
+    exit 1
+}
+
+get_os() { # function to get the current Operating System
+    local uname_res=$(${UNAME} -s)
+    if [[ $(${DATE} -h 2>&1 | ${GREP} -ic busybox) -gt 0 ]]; then
+	os="busybox"
+    elif [[ ${uname_res} == "Linux" ]]; then
+	os="linux"
+    elif [[ ${uname_res} == "FreeBSD" ]]; then
+	os="bsd"
+    elif [[ ${uname_res} == "Darwin" ]]; then
+	os="mac"
+    elif [[ ${uname_res:0:6} == "CYGWIN" ]]; then
+	os="cygwin"
+    elif [[ ${uname_res:0:5} == "MINGW" ]]; then
+	os="mingw"
+    else
+	os="unknown"
+    fi
+    debug "detected os type = $os"
+}
+
+graceful_exit() { # normal exit function.
+    clean_up
+    exit
+}
+
+info() { # write out info as long as the quiet flag has not been set.
+    if [[ ${_QUIET} -eq 0 ]]; then
+        ${ECHO} "$@"
+    fi
+}
+
+install_file() { # conditionally install file if ${dest} is not empty,
+		 # source file exists and file is new
+    local label="$1"; shift
+    local force="$1"; shift
+    local perms="$1"; shift
+    local dest="$1"; shift
+    local source="$1"; shift
+    local temp=
+
+    if [[ -z "${dest}" ]] || [[ ! -f "${source}" ]]; then
+	return
+    fi
+    if [[ -n "$1" ]]; then
+	# Multiple source files
+	temp=$(${MKTEMP})
+	${CAT} ${source} > ${temp}
+	while [[ -n "$1" ]]; do
+	    if [[ ! -f "$1" ]]; then
+		${RM} -f ${temp}
+		return
+	    fi
+	    ${CAT} "$1" >> ${temp}
+	    shift
+	done
+	${TOUCH} --reference=${source} ${temp}
+	${CHMOD} --reference=${source} ${temp}
+	source=${temp}
+    fi
+    if [[ -f "${dest}" ]] && [[ "${force}" -eq 0 ]]; then
+	local lastmod_old=$(${STAT} -c %Y ${dest})
+	local lastmod_new=$(${STAT} -c %Y ${source})
+	if [[ ${lastmod_new} -le ${lastmod_old} ]]; then
+	    if ${DIFF} -q ${source} ${dest}; then
+		if [[ -n "${temp}" ]]; then
+		    ${RM} -f ${temp}
+		fi
+		return
+	    fi
+	fi
+    fi
+    info "[${DOMAIN}] Install $label $dest"
+    ${INSTALL} -pD ${perms} ${source} ${dest}
+
+    if [[ -n "${temp}" ]]; then
+	${RM} -f ${temp}
+    fi
+}
+
+load_commands() { # load command sull path
+    local file=$(dirname $0)/getssl-cmds-${os}
+    if [[ -f ${file} ]]; then
+	. ${file}
+    fi
+}
+
+signal_exit() { # Handle trapped signals
+    case $1 in
+        INT)
+            error_exit "Program interrupted by user" ;;
+        TERM)
+            echo -e "\n$PROGNAME: Program terminated" >&2
+            graceful_exit ;;
+        *)
+            error_exit "$PROGNAME: Terminating on unknown signal" ;;
+    esac
+}
+
+help_message() { # print out the help message
+    ${CAT} <<- _EOF_
+	${PROGNAME} ver. ${VERSION}
+	Install available SSL certificate obtained by getssl
+
+	$(usage)
+
+	Options:
+	  -h, --help             Display this help message and exit
+	  -a, --all              Check all certificates
+	  -f, --force            Force full reinstall (overrides files)
+	  -d, --debug            Outputs debug information
+	  -w, --working_dir DIR  Working directory
+	  -q, --quiet            Quiet mode (only outputs on error)
+
+	_EOF_
+}
+
+usage() { # echos out the program usage
+    echo "Usage: $PROGNAME [-h|--help] [-a|--all] [-f|--force]" \
+       "[-w working_dir] [-q|--quiet] [-d|--debug] domain"
+}
+
+# -----------------------------------------------------------------------------
+# Main logic
+
+# Get the current OS, so the correct functions can be used for that
+# OS. (sets the variable os)
+get_os
+
+# Load commands
+load_commands
+
+# Trap signals
+trap "signal_exit TERM" TERM HUP
+trap "signal_exit INT"  INT
+
+# Parse command-line
+while [[ -n ${1} ]]; do
+    case $1 in
+        -h | --help)
+            help_message; graceful_exit ;;
+        -d | --debug)
+            ORIG_CMD+=" -d"
+            INSTALL+=" -v"
+            _USE_DEBUG=1 ;;
+        -q | --quiet)
+            ORIG_CMD+=" -q"
+            _QUIET=1 ;;
+        -f | --force)
+            ORIG_CMD+=" -f"
+            _FORCE=1 ;;
+        -a | --all)
+            _CHECK_ALL=1 ;;
+        -w | --working_dir)
+            shift; WORKING_DIR="$1" ;;
+        -* | --*)
+            usage
+            error_exit "Unknown option $1" ;;
+        *)
+            if [[ ! -z $DOMAIN ]]; then
+                error_exit "invalid command line $DOMAIN - it appears to contain more than one domain"
+            fi
+            DOMAIN="$1"
+            if [[ -z $DOMAIN ]]; then
+                error_exit "invalid command line - it appears to contain a null variable"
+            fi ;;
+    esac
+    shift
+done
+
+# if nothing in command line, print help and exit.
+if [[ -z "${DOMAIN}" ]] && [[ ${_CHECK_ALL} -ne 1 ]]; then
+    help_message
+    graceful_exit
+fi
+
+# check if the "working directory" exist.
+if [[ ! -d "${WORKING_DIR}" ]]; then
+    error_exit "Working directory not found: ${WORKING_DIR}"
+fi
+
+# read any variables from config in working directory
+if [[ -s "${WORKING_DIR}/getssl.cfg" ]]; then
+    debug "reading config from ${WORKING_DIR}/getssl.cfg"
+		# shellcheck source=/dev/null
+    . "${WORKING_DIR}/getssl.cfg"
+fi
+
+# Define defaults for variables not set in the main config.
+DOMAIN_STORAGE="${DOMAIN_STORAGE:=${WORKING_DIR}}"
+DOMAIN_DIR="${DOMAIN_STORAGE}/${DOMAIN}"
+CERT_FILE="${DOMAIN_DIR}/${DOMAIN}.crt"
+KEY_FILE="${DOMAIN_DIR}/${DOMAIN}.key"
+CA_CERT="${DOMAIN_DIR}/chain.crt"
+
+# if "-a" option then check other parameters and create run for each domain.
+if [[ ${_CHECK_ALL} -eq 1 ]]; then
+    info "Install all certificates"
+
+    if [[ ! -d "${DOMAIN_STORAGE}" ]]; then
+        error_exit "DOMAIN_STORAGE not found  - ${DOMAIN_STORAGE}"
+    fi
+
+    for dir in ${DOMAIN_STORAGE}/*; do
+        if [[ -d "${dir}" ]]; then
+            debug "Checking ${dir}"
+            # check if $dir looks like a domain name (contains a period)
+            if [[ $(basename "${dir}") == *.* ]]; then
+                cmd="${ORIG_CMD} -w ${WORKING_DIR} "$(basename "${dir}")
+                debug "CMD: ${cmd}"
+                eval "${cmd}"
+            fi
+        fi
+    done
+
+    graceful_exit
+fi
+# end of "-a" option (looping through all domains)
+
+# check if the "domain directory" exist.
+if [[ ! -d "${DOMAIN_DIR}" ]]; then
+    error_exit "DOMAIN not found: ${DOMAIN_DIR##*/}"
+fi
+
+# read any variables from config in domain directory
+if [[ -s "${DOMAIN_DIR}/getssl.cfg" ]]; then
+  debug "reading config from ${DOMAIN_DIR}/getssl.cfg"
+  # shellcheck source=/dev/null
+  . "${DOMAIN_DIR}/getssl.cfg"
+fi
+
+# check config for typical errors.
+check_config
+
+# check if a certificate is present
+if [[ ! -f "${CERT_FILE}" ]]; then
+    error_exit "CERT_FILE not found: ${CERT_FILE}"
+fi
+
+# check if a private key is present
+if [[ ! -f "${KEY_FILE}" ]]; then
+    error_exit "KEY_FILE not found: ${KEY_FILE}"
+fi
+
+# check private key and certificate match!
+
+modulus_crt=$(${OPENSSL} x509 -noout -modulus -in ${CERT_FILE})
+modulus_key=$(${OPENSSL} rsa -noout -modulus -in ${KEY_FILE})
+if [[ -z "${modulus_crt}" ]] || [[ -z "${modulus_key}" ]]; then
+    error_exit "Certificate or private key integrity issue"
+fi
+
+modulus_crt=$(${ECHO} ${modulus_crt} | ${OPENSSL} md5)
+modulus_key=$(${ECHO} ${modulus_key} | ${OPENSSL} md5)
+if [[ "${modulus_crt}" != "${modulus_key}" ]]; then
+    error_exit "Certificate and private key don't match, aborting!"
+fi
+
+# check if certificate is new or missing at destination
+if [[ -f "${DOMAIN_CERT_LOCATION}" ]] && [[ "${_FORCE}" -eq 0 ]]; then
+    lastmod_old=$(${STAT} -c %Y "${DOMAIN_CERT_LOCATION}")
+    lastmod_new=$(${STAT} -c %Y "${CERT_FILE}")
+    if [[ ${lastmod_new} -le ${lastmod_old} ]]; then
+	info "[${DOMAIN}] certificate is up-to-date."
+        # No new certificate - terminate here
+        graceful_exit
+    fi
+fi
+
+# (RSA) Certificate, private key and CA chain
+install_file "certificate" ${_TRUE} \
+	     "${INSTALL_CERT_MODE} ${INSTALL_CERT_OWNER}" \
+	     "${DOMAIN_CERT_LOCATION}" "${CERT_FILE}"
+install_file "private key" ${_FORCE} \
+	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
+	     "${DOMAIN_KEY_LOCATION}" "${DOMAIN_DIR}/${DOMAIN}.key"
+install_file "CA chain" ${_FORCE} \
+	     "${INSTALL_CERT_MODE} ${INSTALL_CERT_OWNER}" \
+	     "${CA_CERT_LOCATION}" "${CA_CERT}"
+
+# (ECC) Certificate, private key and CA chain
+install_file "ec domain certificate" ${_FORCE} \
+	     "${INSTALL_CERT_MODE} ${INSTALL_CERT_OWNER}" \
+	     "${DOMAIN_CERT_LOCATION::-4}.ec.crt" "${CERT_FILE::-4}.ec.crt"
+install_file "ec private key" ${_FORCE} \
+	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
+	     "${DOMAIN_KEY_LOCATION::-4}.ec.key" "$DOMAIN_DIR/${DOMAIN}.ec.key"
+install_file "ec CA certificate" ${_FORCE} \
+	     "${INSTALL_CERT_MODE} ${INSTALL_CERT_OWNER}" \
+             "${CA_CERT_LOCATION::-4}.ec.crt" "${CA_CERT::-4}.ec.crt"
+
+# (RSA & ECC) Full certificate chain
+install_file "full chain" ${_TRUE} \
+	     "${INSTALL_CERT_MODE} ${INSTALL_CERT_OWNER}" \
+	     "$DOMAIN_CHAIN_LOCATION" "$CERT_FILE" "$CA_CERT"
+install_file "ec full chain" ${_FORCE} \
+	     "${INSTALL_CERT_MODE} ${INSTALL_CERT_OWNER}" \
+	     "${DOMAIN_CHAIN_LOCATION}.ec" "${CERT_FILE::-4}.ec.crt" "${CA_CERT::-4}.ec.crt"
+
+# (RSA & ECC) Combined private key and certificate
+install_file "private key and domain cert" ${_TRUE} \
+	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
+	     "${DOMAIN_KEY_CERT_LOCATION}" "$DOMAIN_DIR/${DOMAIN}.key" "$CERT_FILE"
+install_file "private ec key and ec domain cert" ${_FORCE} \
+	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
+	     "${DOMAIN_CHAIN_LOCATION}.ec" "$DOMAIN_DIR/${DOMAIN}.ec.key" "${CERT_FILE::-4}.ec.crt"
+
+# (RSA & ECC) Combined private key, certificate and CA chain
+install_file "full key, cert and chain pem" ${_TRUE} \
+	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
+	     "${DOMAIN_PEM_LOCATION}" "$DOMAIN_DIR/${DOMAIN}.key" "$CERT_FILE" "$CA_CERT"
+install_file "full ec key, cert and chain pem" ${_FORCE} \
+	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
+	     "${DOMAIN_PEM_LOCATION}.ec" "$DOMAIN_DIR/${DOMAIN}.ec.key" "${CERT_FILE::-4}.ec.crt" "${CA_CERT::-4}.ec.crt"
+
+# gracefully exit ( tidying up temporary files etc).
+graceful_exit
