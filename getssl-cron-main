@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# getssl-cron-main - subset utility of GetSSL - handle main cron job -
+# Made to run 'getssl' without root access. The script open the acme
+# challenge folder for 'other' write-acces, run the 'getssl' as
+# regular user then revert the write-acces.
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+# For usage, run "getssl-cron-main -h"
+
+# Revision history:
+# 2018-01-14 Created (v0.1)
+# -----------------------------------------------------------------------------
+#
+declare -A ACFOLDERS
+
+PROGNAME=${0##*/}
+
+# defaults
+GETSSL_CMD=${0%/*}/getssl
+INSTALL_CMD=${0%/*}/getssl-install-certs
+RELOAD_SERVICE=
+USERNAME=
+WORKING_DIR=
+_USE_DEBUG=0
+
+CHMOD=/bin/chmod
+ECHO=/bin/echo
+STAT=/usr/bin/stat
+SU=/bin/su
+
+# Define all functions (in alphabetical order)
+
+debug() { # write out debug info if the debug flag has been set
+  if [[ ${_USE_DEBUG} -eq 1 ]]; then
+    ${ECHO} "$@"
+  fi
+}
+
+acme_challenge_folder_close() { # remove other acces to acme challenge folders
+    local dir
+    for dir in ${!ACFOLDERS[@]}; do
+	if [ ${ACFOLDERS[${dir}]:8:1} != 'w' ]; then
+	    local perms=$(${STAT} -c %A ${dir})
+	    if [ ${perms:8:1} == 'w' ]; then 
+		${CHMOD} o-w ${dir}
+		debug Removing access to ${dir} #[${perms} =\> $(stat -c %A ${dir})]
+	    fi
+	fi
+    done
+}
+
+acme_challenge_folder_dump() { # dump list of acme challenge folders
+    local dir
+    for dir in ${!ACFOLDERS[@]}; do
+	debug [${ACFOLDERS[${dir}]}] ${dir}
+    done
+}
+
+acme_challenge_folder_load() { # load list of acme challenge folders
+    local domain=$1
+    
+    if [ -n "${domain}" ]; then
+	test -f ${WORKING_DIR}/${domain}/getssl.cfg && DOMAINS[0]=${domain}
+    else
+	for dir in ${WORKING_DIR}/*; do
+	    test -d ${dir} || continue
+	    test -f ${dir}/getssl.cfg || continue
+	    DOMAINS+=(${dir##*/})
+	done
+    fi
+    if [ "${#DOMAINS[@]}" -lt 1 ]; then
+	${ECHO} "No domains defined"
+	exit
+    fi
+
+    for dom in ${DOMAINS[@]}; do
+	test -f ${WORKING_DIR}/${dom}/getssl.cfg || continue
+	. ${WORKING_DIR}/${dom}/getssl.cfg
+	for acl in ${ACL[@]}; do
+	    test ${acl:0:1} == '/' || continue
+	    ACFOLDERS[${acl}]=$(stat -c %A ${acl})
+	done
+    done
+}
+
+acme_challenge_folder_open() { # grant other acces to acme challenge folders
+    local dir
+    for dir in ${!ACFOLDERS[@]}; do
+	if [ ${ACFOLDERS[${dir}]:8:1} != 'w' ]; then
+	    ${CHMOD} o+w ${dir}
+	    debug Adding access to ${dir} #[${ACFOLDERS[${dir}]} =\> $(stat -c %A ${dir})]
+	fi
+    done
+}
+
+usage() { # echos out the program usage
+    ${ECHO} "Usage: $PROGNAME [-h|--help] [-d|--debug] [-q|--quiet]"\
+	     "[-w working_dir] {domain {domain} ...} {-- {getssl-options}}"
+}
+
+## Main logic
+test -z "$1" && usage && exit
+
+# get options
+while [ -n "$1" ] && [ ${1:0:1} == '-' ]; do
+    case $1 in
+	-h|--help)
+	    usage; exit ;;
+	-d|--debug)
+	    GETSSL_CMD+=' -d';
+	    INSTALL_CMD+=' -d';
+	    _USE_DEBUG=1 ;;
+	-r|--reload)
+	    shift; RELOAD_SERVICE=$1 ;;
+	-u|--user)
+	    shift; USERNAME=$1 ;;
+	-w)
+	    shift; WORKING_DIR="$1";
+	    GETSSL_CMD+=" -w ${WORKING_DIR}"
+	    INSTALL_CMD+=" -w ${WORKING_DIR}" ;;
+	--)
+	    # All remainder options are for 'getssl', no specific
+	    # domain provided.
+	    shift; #GETSSL_CMD+=' -a';
+	    while [ -n "$1" ]; do
+		GETSSL_CMD+=' '$1
+		shift
+	    done
+	    ;;
+	*)
+	    ${ECHO} "Unknown option: $1"
+	    exit ;;
+    esac
+    shift
+done
+
+test -z "${WORKING_DIR}" && {
+    ${ECHO} "Working directory is not defined, missing option '-w'"
+    exit
+}
+test -z "${USERNAME}" && {
+    ${ECHO} "User is not defined, missing option '-u'"
+    exit
+}
+test -d "${WORKING_DIR}" || {
+    ${ECHO} "Working dir folder not found: ${WORKING_DIR}"
+    exit
+}
+
+# No more arguments = no domain specified
+test -z "$1" && GETSSL_CMD+=' -a' && INSTALL_CMD+=' -a'
+
+# Loop domains to load challenge folder, stop at end of list or '--'
+while :; do
+    test -n "$1" && GETSSL_CMD+=" $1" && INSTALL_CMD+=" $1"
+    acme_challenge_folder_load $1
+    shift
+    test -z "$1" && break
+    test "$1" == '--' && shift && break
+done
+
+# All remainder options are for 'getssl'.
+while [ -n "$1" ]; do
+    GETSSL_CMD+=' '$1
+    shift
+done
+
+acme_challenge_folder_dump
+acme_challenge_folder_open
+
+debug Executing su ${USERNAME} -c "${GETSSL_CMD}"
+${SU} ${USERNAME} -c "${GETSSL_CMD}"
+
+acme_challenge_folder_close
+
+${INSTALL_CMD}
+
+test -n "${RELOAD_SERVICE}" && service ${RELOAD_SERVICE} reload
