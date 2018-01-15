@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# getssl-cron-main - subset utility of GetSSL - handle main cron job -
-# Made to run 'getssl' without root access. The script open the acme
-# challenge folder for 'other' write-acces, run the 'getssl' as
-# regular user then revert the write-acces.
+# getssl-runas - subset utility of GetSSL - Made to run 'getssl'
+# without root access. The script open the acme challenge folder for
+# 'other' write-access, run the 'getssl' as regular user then revert
+# the write-access.
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,24 +16,28 @@
 # GNU General Public License at <http://www.gnu.org/licenses/> for
 # more details.
 
-# For usage, run "getssl-cron-main -h"
+# For usage, run "getssl-runas -h"
 
 # Revision history:
 # 2018-01-14 Created (v0.1)
+# 2018-01-15 Redesign for basic function, remove installation and
+#            service reload, redesign the processing of the options
+#            (v0.2)
+#
 # -----------------------------------------------------------------------------
 #
 declare -A ACFOLDERS
 
 PROGNAME=${0##*/}
+VERSION="0.02"
 
 # defaults
-GETSSL_CMD=${0%/*}/getssl
-INSTALL_CMD=${0%/*}/getssl-install-certs
-RELOAD_SERVICE=
+GETSSL_CMD=(${0%/*}/getssl)
 USERNAME=
 WORKING_DIR=
 _USE_DEBUG=0
 
+CAT=/bin/cat
 CHMOD=/bin/chmod
 ECHO=/bin/echo
 STAT=/usr/bin/stat
@@ -104,86 +108,89 @@ acme_challenge_folder_open() { # grant other acces to acme challenge folders
     done
 }
 
+error_exit() { # give error message on error exit
+  ${ECHO} -e "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+  exit 1
+}
+
+error_usage_exit() { # give error message and usage on error exit
+  ${ECHO} -e "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+  usage
+  exit
+}
+
 usage() { # echos out the program usage
-    ${ECHO} "Usage: $PROGNAME [-h|--help] [-d|--debug] [-q|--quiet]"\
-	     "[-w working_dir] {domain {domain} ...} {-- {getssl-options}}"
+    ${CAT} <<EOF
+Usage: ${PROGNAME} USERNAME [-w WORKING_DIR] [-q|--quiet]
+       [-h|--help] [-d|--debug] [DOMAIN [DOMAIN ...]] [-- [getssl-options ...]]
+EOF
 }
 
 ## Main logic
 test -z "$1" && usage && exit
 
-# get options
-while [ -n "$1" ] && [ ${1:0:1} == '-' ]; do
-    case $1 in
-	-h|--help)
-	    usage; exit ;;
-	-d|--debug)
-	    GETSSL_CMD+=' -d';
-	    INSTALL_CMD+=' -d';
-	    _USE_DEBUG=1 ;;
-	-r|--reload)
-	    shift; RELOAD_SERVICE=$1 ;;
-	-u|--user)
-	    shift; USERNAME=$1 ;;
-	-w)
-	    shift; WORKING_DIR="$1";
-	    GETSSL_CMD+=" -w ${WORKING_DIR}"
-	    INSTALL_CMD+=" -w ${WORKING_DIR}" ;;
-	--)
-	    # All remainder options are for 'getssl', no specific
-	    # domain provided.
-	    shift; #GETSSL_CMD+=' -a';
-	    while [ -n "$1" ]; do
-		GETSSL_CMD+=' '$1
-		shift
-	    done
-	    ;;
-	*)
-	    ${ECHO} "Unknown option: $1"
-	    exit ;;
+# Get options
+while [ -n "$1" ]; do
+    case "$1" in
+        -h|--help)
+            usage; exit ;;
+        -w|--working_dir)
+            shift; WORKING_DIR="$1"
+            GETSSL_CMD+=(-w ${WORKING_DIR}) ;;
+        -d|--debug)
+            GETSSL_CMD+=(-d)
+            _USE_DEBUG=1 ;;
+        --)	# Handle 'getssl' options
+            shift; while [ -n "$1" ]; do
+                case "$1" in
+                    -a|--all)
+                        ${ECHO} "Superfluous 'getssl' option (ignored): $1"
+                        shift; continue ;;
+                    -c|--create)
+                        error_exit "Unsupported 'getssl' option: $1" ;;
+                    -f|--force)
+                        if [ ${#ARGS[@]} -eq 1 ]; then
+                            error_exit "Incompatible 'getssl' option: $1 (at least one domain is required)"
+                        fi ;;
+                esac
+                GETSSL_CMD+=($1); shift;
+            done ;;
+        -*)
+            usage_exit "Unknown option: $1" ;;
+        *)
+            ARGS+=($1) ;;
     esac
     shift
 done
 
-test -z "${WORKING_DIR}" && {
-    ${ECHO} "Working directory is not defined, missing option '-w'"
-    exit
-}
-test -z "${USERNAME}" && {
-    ${ECHO} "User is not defined, missing option '-u'"
-    exit
-}
-test -d "${WORKING_DIR}" || {
-    ${ECHO} "Working dir folder not found: ${WORKING_DIR}"
-    exit
-}
+## Check and get USERNAME
+test -z "${ARGS[0]}" && usage_exit "Username is missing"
+USERNAME=${ARGS[0]}; unset ARGS[0]; ARGS=("${ARGS[@]}")
 
-# No more arguments = no domain specified
-test -z "$1" && GETSSL_CMD+=' -a' && INSTALL_CMD+=' -a'
+## Check working directory
+test -z "${WORKING_DIR}" && \
+    error_usage_exit "Working directory is not defined, missing option '-w'"
+test -d "${WORKING_DIR}" || \
+    error_exit "Working dir folder not found: ${WORKING_DIR}"
 
-# Loop domains to load challenge folder, stop at end of list or '--'
-while :; do
-    test -n "$1" && GETSSL_CMD+=" $1" && INSTALL_CMD+=" $1"
-    acme_challenge_folder_load $1
-    shift
-    test -z "$1" && break
-    test "$1" == '--' && shift && break
-done
+## Add getssl --all option, if no DOMAIN is specified
+test -z "${ARGS[0]}" && GETSSL_CMD+=(-a)
 
-# All remainder options are for 'getssl'.
-while [ -n "$1" ]; do
-    GETSSL_CMD+=' '$1
-    shift
+## Do-while loop - load ACME challenge folders
+i=0; while :; do
+    acme_challenge_folder_load ${ARGS[$i]}
+    let i+=1; test -z "${ARGS[$i]}" && break
 done
 
 acme_challenge_folder_dump
 acme_challenge_folder_open
 
-debug Executing su ${USERNAME} -c "${GETSSL_CMD}"
-${SU} ${USERNAME} -c "${GETSSL_CMD}"
+## Do-while loop - execute getssl for each domain (or once for --all)
+i=0; while :; do
+    cmd="${GETSSL_CMD[@]} ${ARGS[$i]}"
+    debug Executing su ${USERNAME} -c "${cmd}"
+    ${SU} ${USERNAME} -c "${cmd}"
+    let i+=1; test -z "${ARGS[$i]}" && break
+done
 
 acme_challenge_folder_close
-
-${INSTALL_CMD}
-
-test -n "${RELOAD_SERVICE}" && service ${RELOAD_SERVICE} reload
