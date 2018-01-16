@@ -19,11 +19,12 @@
 
 # Revision history:
 # 2018-01-14 Created (v0.1)
+# 2018-01-16 Extend 'finish|term*' command for aditional args (v0.2)
 # -----------------------------------------------------------------------------
 #
 
 PROGNAME=${0##*/}
-VERSION=0.1
+VERSION=0.2
 
 INSTALL_CMD=${0%/*}/getssl-install-certs
 
@@ -54,7 +55,8 @@ case "$1" in
     finish|term*)
 	test -z "$2" && ${ECHO} "Missing domain!" && exit
 	$0 stop
-	${INSTALL_CMD} $2
+	shift
+	${INSTALL_CMD} $*
 	;;
     *)
 	${ECHO} "Usage: ${PROGNAME} <start|stop> [to-server|domain]"
