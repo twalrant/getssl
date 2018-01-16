@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# getssl-remote - subset utility of GetSSL - handle remote cron
+# job - Made to redirect port 80 to server handling 'getssl' execution
+# for acme challenge access and to install certificate.
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+# For usage, run "getssl-remote help"
+
+# Revision history:
+# 2018-01-14 Created (v0.1)
+# -----------------------------------------------------------------------------
+#
+
+PROGNAME=${0##*/}
+VERSION=0.1
+
+INSTALL_CMD=${0%/*}/getssl-install-certs
+
+CAT=/bin/cat
+ECHO=/bin/echo
+SOCAT=/usr/bin/socat
+RM=/bin/rm
+WHICH=/usr/bin/which
+
+for x in socat; do
+    ${WHICH} ${x} 2>&1 >/dev/null || {
+	${ECHO} "Application not found: ${x}"
+	exit
+    }
+done
+
+case "$1" in
+    start)
+	test -z "$2" && ${ECHO} "Missing destination server!" && exit
+	${ECHO} $$ > /var/run/${PROGNAME}.pid
+	exec ${SOCAT} TCP-LISTEN:80,reuseaddr,fork,su=nobody TCP:$2:80
+	;;
+    stop)
+	test -f /var/run/${PROGNAME}.pid && \
+	    kill -9 $(${CAT} /var/run/${PROGNAME}.pid)
+	${RM} -f /var/run/${PROGNAME}.pid
+	;;
+    finish|term*)
+	test -z "$2" && ${ECHO} "Missing domain!" && exit
+	$0 stop
+	${INSTALL_CMD} $2
+	;;
+    *)
+	${ECHO} "Usage: ${PROGNAME} <start|stop> [to-server|domain]"
+    ;;
+esac
