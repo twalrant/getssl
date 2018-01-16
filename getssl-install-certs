@@ -178,7 +178,7 @@ install_file() { # conditionally install file if ${dest} is not empty,
 }
 
 load_commands() { # load command sull path
-    local file=$(dirname $0)/getssl-cmds-${os}
+    local file=$(dirname $0)/commands/${os}
     if [[ -f ${file} ]]; then
 	. ${file}
     fi
