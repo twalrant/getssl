@@ -216,6 +216,7 @@ PUBLIC_DNS_SERVER=""
 RELOAD_CMD=""
 RENEW_ALLOW="30"
 REUSE_PRIVATE_KEY="true"
+SERVER_PREFIX=""
 SERVER_TYPE="https"
 SKIP_HTTP_TOKEN_CHECK="false"
 SSLCONF="$(openssl version -d 2>/dev/null| cut -d\" -f2)/openssl.cnf"
@@ -1341,6 +1342,15 @@ write_domain_template() { # write out a template file for a domain.
 	## certificate is running (if CHECK_REMOTE) is set to true
 	#SERVER_TYPE="https"
 	#CHECK_REMOTE="true"
+
+	## Define a server FQHN prefix used during certificate
+	## verification. The prefix makes sure a public IP address is always
+	## used for verification in case a server/service is duplicated within
+	## home network (e.g. smtp). The server is available twice using the
+	## same FQHN (e.g. smtp.domain.net) with a public DNS record and a
+	## private DNS record (served by a local LAN DNS). The former requires
+	## a certificate and the later does not support SSL.
+	#SERVER_PREFIX=pub-
 	_EOF_domain_
 }
 
@@ -1651,7 +1661,7 @@ if [[ "${CHECK_REMOTE}" == "true" ]] && [[ $_FORCE_RENEW -eq 0 ]]; then
   debug "getting certificate for $DOMAIN from remote server"
   # shellcheck disable=SC2086
   EX_CERT=$(echo \
-    | openssl s_client -servername "${DOMAIN}" -connect "${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} 2>/dev/null \
+    | openssl s_client -servername "${DOMAIN}" -connect "${SERVER_PREFIX}${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} 2>/dev/null \
     | openssl x509 2>/dev/null)
   if [[ ! -z "$EX_CERT" ]]; then # if obtained a cert
     if [[ -s "$CERT_FILE" ]]; then # if local exists
@@ -2173,7 +2183,7 @@ if [[ ${CHECK_REMOTE} == "true" ]]; then
   sleep "$CHECK_REMOTE_WAIT"
   # shellcheck disable=SC2086
   CERT_REMOTE=$(echo \
-    | openssl s_client -servername "${DOMAIN}" -connect "${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} 2>/dev/null \
+    | openssl s_client -servername "${DOMAIN}" -connect "${SERVER_PREFIX}${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} 2>/dev/null \
     | openssl x509 -noout -fingerprint 2>/dev/null)
   CERT_LOCAL=$(openssl x509 -noout -fingerprint < "$CERT_FILE" 2>/dev/null)
   if [[ "$CERT_LOCAL" == "$CERT_REMOTE" ]]; then
