@@ -18,10 +18,11 @@
 
 # Revision history:
 # 2018-01-12 Created (v0.1)
+# 2018-01-17 add installation of DHPARAM file (v0.2)
 # -----------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
-VERSION="0.01"
+VERSION="0.02"
 
 # defaults
 DOMAIN=
@@ -376,6 +377,10 @@ install_file "private key" ${_FORCE} \
 install_file "CA chain" ${_FORCE} \
 	     "${INSTALL_CERT_MODE} ${INSTALL_CERT_OWNER}" \
 	     "${CA_CERT_LOCATION}" "${CA_CERT}"
+install_file "DH parameter" ${_FORCE} \
+	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
+	     "${DOMAIN_DHPARAM_LOCATION}" \
+	     "${DOMAIN_DIR}/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}"
 
 # (ECC) Certificate, private key and CA chain
 install_file "ec domain certificate" ${_FORCE} \
@@ -403,6 +408,11 @@ install_file "private key and domain cert" ${_TRUE} \
 install_file "private ec key and ec domain cert" ${_FORCE} \
 	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
 	     "${DOMAIN_CHAIN_LOCATION}.ec" "$DOMAIN_DIR/${DOMAIN}.ec.key" "${CERT_FILE::-4}.ec.crt"
+
+# (RSA) Combined private key, dhparam and certificate
+install_file "private key, dhparam and domain cert" ${_TRUE} \
+	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
+	     "${DOMAIN_KEY_CERT_DH_LOCATION}" "$DOMAIN_DIR/${DOMAIN}.key" "$CERT_FILE" "$DOMAIN_DIR/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}"
 
 # (RSA & ECC) Combined private key, certificate and CA chain
 install_file "full key, cert and chain pem" ${_TRUE} \
