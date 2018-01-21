@@ -156,7 +156,7 @@ while [ -n "$1" ]; do
                 GETSSL_CMD+=($1); shift;
             done ;;
         -*)
-            usage_exit "Unknown option: $1" ;;
+            error_usage_exit "Unknown option: $1" ;;
         *)
             ARGS+=($1) ;;
     esac
@@ -164,7 +164,7 @@ while [ -n "$1" ]; do
 done
 
 ## Check and get USERNAME
-test -z "${ARGS[0]}" && usage_exit "Username is missing"
+test -z "${ARGS[0]}" && error_usage_exit "Username is missing"
 USERNAME=${ARGS[0]}; unset ARGS[0]; ARGS=("${ARGS[@]}")
 
 ## Check working directory
