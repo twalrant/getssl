@@ -49,7 +49,7 @@ case "$1" in
 	;;
     stop)
 	test -f /var/run/${PROGNAME}.pid && \
-	    kill -9 $(${CAT} /var/run/${PROGNAME}.pid)
+	    kill -TERM $(${CAT} /var/run/${PROGNAME}.pid)
 	${RM} -f /var/run/${PROGNAME}.pid
 	;;
     finish|term*)
