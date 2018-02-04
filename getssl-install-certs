@@ -409,10 +409,17 @@ install_file "private ec key and ec domain cert" ${_FORCE} \
 	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
 	     "${DOMAIN_CHAIN_LOCATION}.ec" "$DOMAIN_DIR/${DOMAIN}.ec.key" "${CERT_FILE::-4}.ec.crt"
 
-# (RSA) Combined private key, dhparam and certificate
+# (RSA) Combined private key, certificate and dhparam
 install_file "private key, dhparam and domain cert" ${_TRUE} \
 	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
-	     "${DOMAIN_KEY_CERT_DH_LOCATION}" "$DOMAIN_DIR/${DOMAIN}.key" "$CERT_FILE" "$DOMAIN_DIR/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}"
+	     "${DOMAIN_KEY_CERT_DH_LOCATION}" \
+	     "$DOMAIN_DIR/${DOMAIN}.key" "$CERT_FILE" "$DOMAIN_DIR/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}"
+
+# (RSA) Combined private key, certificate, CA chain and dhparam
+install_file "private key, dhparam and domain cert" ${_TRUE} \
+	     "${INSTALL_KEY_MODE} ${INSTALL_KEY_OWNER}" \
+	     "${DOMAIN_KEY_CERT_CA_DH_LOCATION}" \
+	     "$DOMAIN_DIR/${DOMAIN}.key" "$CERT_FILE" "$CA_CERT" "$DOMAIN_DIR/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}"
 
 # (RSA & ECC) Combined private key, certificate and CA chain
 install_file "full key, cert and chain pem" ${_TRUE} \
