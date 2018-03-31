@@ -518,7 +518,7 @@ copy_file_to_location() { # copies a file, using scp, sftp or ftp if required.
     info "copying $cert to $to"
     debug "copying from $from to $to"
     if [[ "${to:0:4}" == "ssh:" ]] ; then
-      debug "using scp scp -q $from ${to:4}"
+      debug "using scp -q $from ${to:4}"
       if ! scp -q "$from" "${to:4}" >/dev/null 2>&1 ; then
         error_exit "problem copying file to the server using scp.
         scp $from ${to:4}"
@@ -644,7 +644,7 @@ create_dhparam() { # create a domain dh parameter file (if it doesn't already ex
     local dhparam_len=$2 # domain dhparam numbits
     # check if key exists, if not then create it.
     if [[ -s "${dhparam_loc}" ]]; then
-	debug "domain key exists at ${dhparam_loc} - skipping generation"
+	debug "domain dhparam exists at ${dhparam_loc} - skipping generation"
 	# ideally need to check validity of domain dhparam
 	chmod 600 "${dhparam_loc}"
     else
