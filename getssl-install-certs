@@ -19,7 +19,7 @@
 # Revision history:
 # 2018-01-12 Created (v0.1)
 # 2018-01-17 Add installation of DHPARAM file (v0.2)
-# 2018-03-31 Change installation method - based of (dynamic) makefile
+# 2018-03-31 Change installation method - based of (dynamic) makefile (v0.3)
 # -----------------------------------------------------------------------------
 declare -A CERTS PRIVATE DESC
 
@@ -200,9 +200,10 @@ load_commands() { # load command sull path
 rule_certs() {	## Create a make rule for public/certs files
     local desc=$1; shift
     local target=$1; shift
-    local deps=${*/%/_LOCAL}
+    local deps=
+    for d in ${*/%/_LOCAL}; do deps+=" \${$d}"; done
     ${CAT}<<EOF
-\${${target}_LOCATION}:	\${${deps// /\} \$\{}}
+\${${target}_LOCATION}:	${deps}
 	@${ECHO} Installing \$@
 	@${ECHO} "## $desc" > \$@
 	@${ECHO} "## $(${DATE})" >> \$@
@@ -219,9 +220,10 @@ EOF
 rule_private() {	## Create a make rule for private files
     local desc=$1; shift
     local target=$1; shift
-    local deps=${*/%/_LOCAL}
+    local deps=
+    for d in ${*/%/_LOCAL}; do deps+=" \${$d}"; done
     ${CAT}<<EOF
-\${${target}_LOCATION}:	\${${deps// /\} \$\{}}
+\${${target}_LOCATION}:	${deps}
 	@${ECHO} Installing \$@
 	@${ECHO} "## $desc" > \$@
 	@${ECHO} "## $(${DATE})" >> \$@
