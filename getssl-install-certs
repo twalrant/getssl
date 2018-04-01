@@ -20,11 +20,12 @@
 # 2018-01-12 Created (v0.1)
 # 2018-01-17 Add installation of DHPARAM file (v0.2)
 # 2018-03-31 Change installation method - based of (dynamic) makefile (v0.3)
+# 2018-04-01 Add support for ssh locations (v0.4)
 # -----------------------------------------------------------------------------
 declare -A CERTS PRIVATE DESC
 
 PROGNAME=${0##*/}
-VERSION="0.03"
+VERSION="0.04"
 
 # defaults
 CAROOT=le-chain
@@ -108,11 +109,17 @@ CHOWN=/bin/chown
 DATE=/bin/date
 ECHO=/bin/echo
 GREP=/bin/grep
+LN=/bin/ln
 MAKE=/usr/bin/make
+MD5SUM=/usr/bin/md5sum
+MKDIR=/bin/mkdir
 OPENSSL=/usr/bin/openssl
 PRINTF=/usr/bin/printf
 RM=/bin/rm
 TEE=/usr/bin/tee
+TOUCH=/usr/bin/touch
+SCP=/usr/bin/scp
+SSH=/usr/bin/ssh
 UNAME=/bin/uname
 
 # Define all functions (in alphabetical order)
@@ -199,11 +206,30 @@ load_commands() { # load command sull path
 
 rule_certs() {	## Create a make rule for public/certs files
     local desc=$1; shift
-    local target=$1; shift
+    local target=$1'_LOCATION'; shift
     local deps=
     for d in ${*/%/_LOCAL}; do deps+=" \${$d}"; done
-    ${CAT}<<EOF
-\${${target}_LOCATION}:	${deps}
+    if [[ "${!target:0:4}" == "ssh:" ]] ; then
+	local sshpath=${!target:4}
+	local sshhost=${sshpath%%:*}
+	local sshtarget=${sshpath##*/}
+	${CAT}<<EOF
+\${${target}}:	${deps}
+	@${MKDIR} -p \${@D}
+	@${ECHO} Installing ${!target:4}
+	@${ECHO} "## $desc" > \$@
+	@${ECHO} "## $(${DATE})" >> \$@
+	@${CAT} \$^ >> \$@
+	@${LN} -s \${@F} ${DOMAIN_DIR}/.ssh/certs-${sshtarget}
+	@${SCP} \$@ ${sshpath}
+EOF
+    [ -n "${INSTALL_CERT_MODE}" ] && ${CAT} <<EOF
+	@${CHMOD} ${INSTALL_CERT_MODE} \$@
+	@${SSH} ${sshhost} "${CHMOD} ${INSTALL_CERT_MODE} ${sshpath#*:}"
+EOF
+    else
+	${CAT}<<EOF
+\${${target}}:	${deps}
 	@${ECHO} Installing \$@
 	@${ECHO} "## $desc" > \$@
 	@${ECHO} "## $(${DATE})" >> \$@
@@ -215,15 +241,35 @@ EOF
     [ -n "${INSTALL_CERT_OWNER}" ] && ${CAT} <<EOF
 	@${CHOWN} ${INSTALL_CERT_OWNER} \$@
 EOF
+    fi
 }
 
 rule_private() {	## Create a make rule for private files
     local desc=$1; shift
-    local target=$1; shift
+    local target=$1'_LOCATION'; shift
     local deps=
     for d in ${*/%/_LOCAL}; do deps+=" \${$d}"; done
-    ${CAT}<<EOF
-\${${target}_LOCATION}:	${deps}
+    if [[ "${!target:0:4}" == "ssh:" ]] ; then
+	local sshpath=${!target:4}
+	local sshhost=${sshpath%%:*}
+	local sshtarget=${sshpath##*/}
+	${CAT}<<EOF
+\${${target}}:	${deps}
+	@${MKDIR} -p \${@D}
+	@${ECHO} Installing ${!target:4}
+	@${ECHO} "## $desc" > \$@
+	@${ECHO} "## $(${DATE})" >> \$@
+	@${CAT} \$^ >> \$@
+	@${LN} -s \${@F} ${DOMAIN_DIR}/.ssh/private-${sshtarget}
+	@${SCP} \$@ ${sshpath}
+EOF
+    [ -n "${INSTALL_KEY_MODE}" ] && ${CAT} <<EOF
+	@${CHMOD} ${INSTALL_KEY_MODE} \$@
+	@${SSH} ${sshhost} "${CHMOD} ${INSTALL_KEY_MODE} ${sshpath#*:}"
+EOF
+    else
+	${CAT}<<EOF
+\${${target}}:	${deps}
 	@${ECHO} Installing \$@
 	@${ECHO} "## $desc" > \$@
 	@${ECHO} "## $(${DATE})" >> \$@
@@ -235,6 +281,7 @@ EOF
     [ -n "${INSTALL_KEY_OWNER}" ] && ${CAT} <<EOF
 	@${CHOWN} ${INSTALL_KEY_OWNER} \$@
 EOF
+    fi
 }
 
 signal_exit() { # Handle trapped signals
@@ -447,7 +494,12 @@ for loc in ${LOCATIONS[@]}; do
 done
 for loc in ${LOCATIONS[@]}
 do
-    locs+=$(${ECHO} $loc=${!loc})
+    if [ "${!loc:0:4}" == "ssh:" ]; then
+	md5=$(${ECHO} ${!loc}|${MD5SUM})
+	locs+=$(${ECHO} $loc=${DOMAIN_DIR}/.ssh/${md5:0:32} \# ${!loc##*:})
+    else
+	locs+=$(${ECHO} $loc=${!loc})
+    fi
     # Command substitution $(foo ..) removes trailing newlines
     locs+=$(${PRINTF} "\nx"); locs=${locs%x} # Add and remove but newline
 done
@@ -470,7 +522,7 @@ DOMAIN_DH_LOCAL=${DH_FILE}
 # Location of files to be installed - extracted from domain getssl.cfg
 ${locs}
 ${files}
-.PHONY: install-${DOMAIN} clean force
+.PHONY: install-${DOMAIN} install clean force
 install-${DOMAIN}:	install
 install:	\${FILES}
 force:		clean install
@@ -488,7 +540,10 @@ clean:
 		\${DOMAIN_DHKEY_LOCATION} \\
 		\${DOMAIN_DHCRT_LOCATION} \\
 		\${DOMAIN_TXTCERT_LOCATION} \\
-		\${DOMAIN_TXTKEY_LOCATION}
+		\${DOMAIN_TXTKEY_LOCATION} \\
+		${DOMAIN_DIR}/.ssh/certs-* \\
+		${DOMAIN_DIR}/.ssh/private-*
+
 # Rules
 ${rules}
 ifdef CA_CERT_LOCATION
