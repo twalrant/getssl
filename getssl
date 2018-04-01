@@ -186,6 +186,7 @@
 # 2017-02-18 add OCSP Must-Staple to the domain csr generation (2.10)
 # ...
 # 2018-01-17 add generation of DHPARAM (2.10.2)
+# 2018-04-01 add missing installation of DHPARAM (2.10.3)
 # ----------------------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
@@ -1733,6 +1734,9 @@ if [[ "${CHECK_REMOTE}" == "true" ]] && [[ $_FORCE_RENEW -eq 0 ]]; then
           copy_file_to_location "private key" \
                                 "$DOMAIN_DIR/${DOMAIN}.key" \
                                 "$DOMAIN_KEY_LOCATION"
+          copy_file_to_location "DH parameters" \
+                                "$DOMAIN_DIR/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}" \
+                                "$DOMAIN_DH_LOCATION"
           copy_file_to_location "CA certificate" "$CA_CERT" "$CA_CERT_LOCATION"
           copy_file_to_location "DH parameter" \
 				"$DOMAIN_DIR/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}" \
@@ -2145,8 +2149,8 @@ fi
 
 copy_file_to_location "domain certificate" "$CERT_FILE" "$DOMAIN_CERT_LOCATION"
 copy_file_to_location "private key" "$DOMAIN_DIR/${DOMAIN}.key" "$DOMAIN_KEY_LOCATION"
+copy_file_to_location "DH parameters" "$DOMAIN_DIR/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}" "$DOMAIN_DH_LOCATION"
 copy_file_to_location "CA certificate" "$CA_CERT" "$CA_CERT_LOCATION"
-copy_file_to_location "DH parameter" "$DOMAIN_DIR/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}" "$DOMAIN_DHPARAM_LOCATION"
 if [[ "$DUAL_RSA_ECDSA" == "true" ]]; then
   if [[ ! -z "$DOMAIN_CERT_LOCATION" ]]; then
     copy_file_to_location "ec domain certificate" \
