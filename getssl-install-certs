@@ -21,11 +21,12 @@
 # 2018-01-17 Add installation of DHPARAM file (v0.2)
 # 2018-03-31 Change installation method - based of (dynamic) makefile (v0.3)
 # 2018-04-01 Add support for ssh locations (v0.4)
+# 2018-04-10 Add '-f' to symlinks creation to force removal of existing destination (v0.5)
 # -----------------------------------------------------------------------------
 declare -A CERTS PRIVATE DESC
 
 PROGNAME=${0##*/}
-VERSION="0.04"
+VERSION="0.05"
 
 # defaults
 CAROOT=le-chain
@@ -220,7 +221,7 @@ rule_certs() {	## Create a make rule for public/certs files
 	@${ECHO} "## $desc" > \$@
 	@${ECHO} "## $(${DATE})" >> \$@
 	@${CAT} \$^ >> \$@
-	@${LN} -s \${@F} ${DOMAIN_DIR}/.ssh/certs-${sshtarget}
+	@${LN} -sf \${@F} ${DOMAIN_DIR}/.ssh/certs-${sshtarget}
 	@${SCP} \$@ ${sshpath}
 EOF
     [ -n "${INSTALL_CERT_MODE}" ] && ${CAT} <<EOF
@@ -260,7 +261,7 @@ rule_private() {	## Create a make rule for private files
 	@${ECHO} "## $desc" > \$@
 	@${ECHO} "## $(${DATE})" >> \$@
 	@${CAT} \$^ >> \$@
-	@${LN} -s \${@F} ${DOMAIN_DIR}/.ssh/private-${sshtarget}
+	@${LN} -sf \${@F} ${DOMAIN_DIR}/.ssh/private-${sshtarget}
 	@${SCP} \$@ ${sshpath}
 EOF
     [ -n "${INSTALL_KEY_MODE}" ] && ${CAT} <<EOF
