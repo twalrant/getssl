@@ -21,17 +21,22 @@
 # 2018-01-17 Add installation of DHPARAM file (v0.2)
 # 2018-03-31 Change installation method - based of (dynamic) makefile (v0.3)
 # 2018-04-01 Add support for ssh locations (v0.4)
-# 2018-04-10 Add '-f' to symlinks creation to force removal of existing destination (v0.5)
+# 2018-04-10 Add '-f' to symlinks creation to force removal of
+#            existing destination (v0.5)
+# 2018-04-10 Add support for local DH parameters file generation and
+#            report files creation '-t' (v0.6)
+#
 # -----------------------------------------------------------------------------
 declare -A CERTS PRIVATE DESC
 
 PROGNAME=${0##*/}
-VERSION="0.05"
+VERSION="0.06"
 
 # defaults
 CAROOT=le-chain
 DEFAULT_TEXT=example.org
 DOMAIN=
+DOMAIN_DHPARAM_LEN=1024
 FORMAT_TEXT="%-26s - %s\n"
 INSTALL_CERT_MODE='0644'
 INSTALL_CERT_OWNER='root.root'
@@ -44,6 +49,7 @@ WORKING_DIR=~/.getssl
 
 _CHECK_ALL=0
 _FORCE=0
+_REPORT=0
 _QUIET=0
 _USE_DEBUG=0
 
@@ -63,7 +69,7 @@ _USE_DEBUG=0
 # _crt.key      | x           x      | CRTKEY  | Domain cert and key 
 # --------------+--------------------+---------+----------------------------
 # .txt          | o    o             | TXTCERT | Domain certs text report
-# .txt          | o    o      o   o  | TXTKEY  | Domain certs text report
+# .txt          | o    o      o   o  | TXTKEY  | Domain private text report
 # --------------+---------------------+--------+----------------------------
 
 ## Supported CA & DOMAIN LOCATION types:
@@ -350,6 +356,10 @@ while [[ -n ${1} ]]; do
             ORIG_CMD+=" -f"
 	    MAKETARGET+=force
             _FORCE=1 ;;
+        -t | --text)
+            ORIG_CMD+=" -t"
+	    MAKETARGET+=text
+            _REPORT=1 ;;
         -a | --all)
             _CHECK_ALL=1 ;;
         -w | --working_dir)
@@ -505,6 +515,15 @@ do
     locs+=$(${PRINTF} "\nx"); locs=${locs%x} # Add and remove but newline
 done
 
+## Create DH file dependencies
+dhdeps=${DOMAIN_DIR}/getssl.cfg
+
+# if not reusing dhparam, then force dependencies
+if [[ "$REUSE_DHPARAM" != "true" ]]; then
+    dhdeps+=' '${CERT_FILE}
+    dhdeps+=' '${KEY_FILE}
+fi
+
 ## Install or update files
 ${CAT} <<EOF > ${DOMAIN_DIR}/install.mk
 ## Makefile - getssl certificates installation
@@ -561,6 +580,9 @@ endif # DOMAIN_KEY_LOCATION
 ifdef DOMAIN_DH_LOCATION
 DOMAIN_TXTKEY_FILES+=\${DOMAIN_DH_LOCATION}
 endif # DOMAIN_DH_LOCATION
+
+.PHONY: text
+text: \${DOMAIN_TXTCERT_LOCATION} \${DOMAIN_TXTKEY_LOCATION}
 
 \${DOMAIN_TXTCERT_LOCATION}:		\${DOMAIN_TXTCERT_FILES}
 	@${ECHO} Creating \$@
@@ -642,6 +664,11 @@ ifneq (\${PRIVATE_OWNER},)
 	@${CHOWN} \${PRIVATE_OWNER} \$@
 endif # PRIVATE_OWNER
 
+\${DOMAIN_DH_LOCAL}:	${dhdeps}
+	@${ECHO} Creating \$@
+	@${OPENSSL} dhparam -out \$@ ${DOMAIN_DHPARAM_LEN}
+	@${CHOWN} 0600 \$@
+
 EOF
 
 _UPTODATE=0
@@ -650,7 +677,10 @@ ${MAKE} -f ${DOMAIN_DIR}/install.mk ${MAKETARGET} | \
 
 if [ ${_UPTODATE} -gt 0 ]
 then
-    info "[${DOMAIN}] certificate is up-to-date."
+    if [ ${_REPORT} -eq 0 ]
+    then
+       info "[${DOMAIN}] certificate is up-to-date."
+    fi
 else
     # Run reload command to restart apache / nginx or whatever system
     if [ -n "${RELOAD_CMD}" ] && [ "${_FORCE}" -eq 0 ]
