@@ -632,8 +632,8 @@ endif # DOMAIN_CERT_LOCATION
 	@${PRINTF} \${FORMAT} ${DOMAIN_PEM_FILE:=${DEFAULT_TEXT}.pem} "${DESC[PEM]}" >> \$@
 	@${PRINTF} \${FORMAT} ${DOMAIN_DH_FILE:=${DEFAULT_TEXT}.dh} "${DESC[DH]}" >> \$@
 	@${PRINTF} \${FORMAT} ${DOMAIN_DHPEM_FILE:=${DEFAULT_TEXT}_dh.pem} "${DESC[DHPEM]}" >> \$@
-	@${PRINTF} \${FORMAT} ${DOMAIN_DHKEY_FILE:=${DEFAULT_TEXT}_dh.key} "${DESC[DHPEM]}" >> \$@
-	@${PRINTF} \${FORMAT} ${DOMAIN_DHCRT_FILE:=${DEFAULT_TEXT}_dh.crt} "${DESC[DHPEM]}" >> \$@
+	@${PRINTF} \${FORMAT} ${DOMAIN_DHKEY_FILE:=${DEFAULT_TEXT}_dh.key} "${DESC[DHKEY]}" >> \$@
+	@${PRINTF} \${FORMAT} ${DOMAIN_DHCRT_FILE:=${DEFAULT_TEXT}_dh.crt} "${DESC[DHCRT]}" >> \$@
 	@${PRINTF} \${FORMAT} ${DOMAIN_CRTKEY_FILE:=${DEFAULT_TEXT}_crt.key} "${DESC[CRTKEY]}" >> \$@
 	@${ECHO} >> \$@
 	@${ECHO} "Details:" >> \$@
