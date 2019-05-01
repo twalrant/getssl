@@ -187,6 +187,7 @@
 # ...
 # 2018-01-17 add generation of DHPARAM (2.10.2)
 # 2018-04-01 add missing installation of DHPARAM (2.10.3)
+# 2019-05-01 add _FORCE_INSTALL (2.10.4)
 # ----------------------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
@@ -235,6 +236,7 @@ WORKING_DIR_ONLY="false"
 _CHECK_ALL=0
 _CREATE_CONFIG=0
 _FORCE_RENEW=0
+_FORCE_INSTALL=0
 _KEEP_VERSIONS=""
 _MUTE=0
 _QUIET=0
@@ -1452,6 +1454,8 @@ while [[ -n ${1+defined} ]]; do
      _CREATE_CONFIG=1 ;;
     -f | --force)
      _FORCE_RENEW=1 ;;
+    -i | --reinstall)
+     _FORCE_INSTALL=1 ;;
     -a | --all)
      _CHECK_ALL=1 ;;
     -k | --keep)
@@ -1681,6 +1685,12 @@ if [[ -e "$DOMAIN_DIR/FORCE_RENEWAL" ]]; then
   info "${DOMAIN}: forcing renewal (due to FORCE_RENEWAL file)"
 fi
 
+if [[ -e "$DOMAIN_DIR/FORCE_INSTALL" ]]; then
+  rm -f "$DOMAIN_DIR/FORCE_INSTALL" || error_exit "problem deleting file $DOMAIN_DIR/FORCE_INSTALL"
+  _FORCE_INSTALL=1
+  info "${DOMAIN}: forcing install (due to FORCE_INSTALL file)"
+fi
+
 # Obtain CA resource locations
 ca_all_loc=$(curl "${CA}/directory" 2>/dev/null)
 URL_new_reg=$(echo "$ca_all_loc" | grep "new-reg" | awk -F'"' '{print $4}')
@@ -1694,40 +1704,51 @@ if [[ "${CHECK_REMOTE}" == "true" ]] && [[ $_FORCE_RENEW -eq 0 ]]; then
   EX_CERT=$(echo \
     | openssl s_client -servername "${DOMAIN}" -connect "${SERVER_PREFIX}${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} 2>/dev/null \
     | openssl x509 2>/dev/null)
-  if [[ ! -z "$EX_CERT" ]]; then # if obtained a cert
+  if [[ ! -z "$EX_CERT" ]] || [[ $_FORCE_INSTALL -eq 1 ]]; then # if obtained a cert / or force install
     if [[ -s "$CERT_FILE" ]]; then # if local exists
       CERT_LOCAL=$(openssl x509 -noout -fingerprint < "$CERT_FILE" 2>/dev/null)
     else # since local doesn't exist leave empty so that the domain validation will happen
       CERT_LOCAL=""
     fi
     CERT_REMOTE=$(echo "$EX_CERT" | openssl x509 -noout -fingerprint 2>/dev/null)
-    if [[ "$CERT_LOCAL" == "$CERT_REMOTE" ]]; then
+    if [[ "$CERT_LOCAL" == "$CERT_REMOTE" ]] && [[ $_FORCE_INSTALL -eq 0 ]]; then
       debug "certificate on server is same as the local cert"
     else
       # check if the certificate is for the right domain
-      EX_CERT_DOMAIN=$(echo "$EX_CERT" | openssl x509 -text \
-        | sed -n -e 's/^ *Subject: .* CN=\([A-Za-z0-9.-]*\).*$/\1/p; /^ *DNS:.../ { s/ *DNS://g; y/,/\n/; p; }' \
-        | sort -u | grep "^$DOMAIN\$")
-      if [[ "$EX_CERT_DOMAIN" == "$DOMAIN" ]]; then
-        # check renew-date on ex_cert and compare to local ( if local exists)
-        enddate_ex=$(echo "$EX_CERT" | openssl x509 -noout -enddate 2>/dev/null| cut -d= -f 2-)
-        enddate_ex_s=$(date_epoc "$enddate_ex")
-        debug "external cert has enddate $enddate_ex ( $enddate_ex_s ) "
-        if [[ -s "$CERT_FILE" ]]; then # if local exists
-          enddate_lc=$(openssl x509 -noout -enddate < "$CERT_FILE" 2>/dev/null| cut -d= -f 2-)
-          enddate_lc_s=$(date_epoc "$enddate_lc")
-          debug "local cert has enddate $enddate_lc ( $enddate_lc_s ) "
-        else
-          enddate_lc_s=0
-          debug "local cert doesn't exist"
-        fi
+      if [[ -n "$EX_CERT" ]]; then
+        EX_CERT_DOMAIN=$(echo "$EX_CERT" | openssl x509 -text \
+          | sed -n -e 's/^ *Subject: .* CN=\([A-Za-z0-9.-]*\).*$/\1/p; /^ *DNS:.../ { s/ *DNS://g; y/,/\n/; p; }' \
+          | sort -u | grep "^$DOMAIN\$")
+      fi
+      if [[ "$EX_CERT_DOMAIN" == "$DOMAIN" ]] || [[ $_FORCE_INSTALL -eq 1 ]]; then
+	if [[ $_FORCE_INSTALL -eq 0 ]]; then
+            # check renew-date on ex_cert and compare to local ( if local exists)
+            enddate_ex=$(echo "$EX_CERT" | openssl x509 -noout -enddate 2>/dev/null| cut -d= -f 2-)
+            enddate_ex_s=$(date_epoc "$enddate_ex")
+            debug "external cert has enddate $enddate_ex ( $enddate_ex_s ) "
+            if [[ -s "$CERT_FILE" ]]; then # if local exists
+		enddate_lc=$(openssl x509 -noout -enddate < "$CERT_FILE" 2>/dev/null| cut -d= -f 2-)
+		enddate_lc_s=$(date_epoc "$enddate_lc")
+		debug "local cert has enddate $enddate_lc ( $enddate_lc_s ) "
+            else
+		enddate_lc_s=0
+		debug "local cert doesn't exist"
+            fi
+	else
+	    enddate_ex_s="1"
+	    enddate_lc_s="2"
+	fi
         if [[ "$enddate_ex_s" -eq "$enddate_lc_s" ]]; then
           debug "certificates expire at the same time"
         elif [[ "$enddate_ex_s" -gt "$enddate_lc_s" ]]; then
           # remote has longer to expiry date than local copy.
           debug "remote cert has longer to run than local cert - ignoring"
         else
-          info "${DOMAIN}: remote cert expires sooner than local, attempting to upload from local"
+	  if [[ $_FORCE_INSTALL -eq 0 ]]; then
+	    info "${DOMAIN}: remote cert expires sooner than local, attempting to upload from local"
+	  else
+            info "${DOMAIN}: forced cert installation"
+	  fi
           copy_file_to_location "domain certificate" \
                                 "$CERT_FILE" \
                                 "$DOMAIN_CERT_LOCATION"
