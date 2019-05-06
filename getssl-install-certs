@@ -25,12 +25,13 @@
 #            existing destination (v0.5)
 # 2018-04-10 Add support for local DH parameters file generation and
 #            report files creation '-t' (v0.6)
+# 2019-05-06 Add support for docker locations (v0.7)
 #
 # -----------------------------------------------------------------------------
 declare -A CERTS PRIVATE DESC
 
 PROGNAME=${0##*/}
-VERSION="0.06"
+VERSION="0.07"
 
 # defaults
 CAROOT=le-chain
@@ -114,6 +115,7 @@ CAT=/bin/cat
 CHMOD=/bin/chmod
 CHOWN=/bin/chown
 DATE=/bin/date
+DOCKER=/usr/bin/docker
 ECHO=/bin/echo
 GREP=/bin/grep
 LN=/bin/ln
@@ -230,24 +232,44 @@ rule_certs() {	## Create a make rule for public/certs files
 	@${LN} -sf \${@F} ${DOMAIN_DIR}/.ssh/certs-${sshtarget}
 	@${SCP} \$@ ${sshpath}
 EOF
-    [ -n "${INSTALL_CERT_MODE}" ] && ${CAT} <<EOF
+	[ -n "${INSTALL_CERT_MODE}" ] && ${CAT} <<EOF
 	@${CHMOD} ${INSTALL_CERT_MODE} \$@
 	@${SSH} ${sshhost} "${CHMOD} ${INSTALL_CERT_MODE} ${sshpath#*:}"
 EOF
     else
-	${CAT}<<EOF
+	if [[ "${!target:0:7}" == "docker:" ]] ; then
+	    local dctnpath=${!target:7}
+	    local dctnhost=${dctnpath%%:*}
+	    local dctntarget=${dctnpath##*/}
+	    ${CAT}<<EOF
+\${${target}}:	${deps}
+	@${MKDIR} -p \${@D}
+	@${ECHO} Installing ${!target:7}
+	@${ECHO} "## $desc" > \$@
+	@${ECHO} "## $(${DATE})" >> \$@
+	@${CAT} \$^ >> \$@
+	@${LN} -sf \${@F} ${DOMAIN_DIR}/.docker/certs-${dctntarget}
+	@${DOCKER} cp \$@ ${dctnpath}
+EOF
+	    [ -n "${INSTALL_CERT_MODE}" ] && ${CAT} <<EOF
+	@${CHMOD} ${INSTALL_CERT_MODE} \$@
+	@${DOCKER} exec ${dctnhost} ${CHMOD} ${INSTALL_CERT_MODE} ${dctnpath#*:}
+EOF
+	else
+	    ${CAT}<<EOF
 \${${target}}:	${deps}
 	@${ECHO} Installing \$@
 	@${ECHO} "## $desc" > \$@
 	@${ECHO} "## $(${DATE})" >> \$@
 	@${CAT} \$^ >> \$@
 EOF
-    [ -n "${INSTALL_CERT_MODE}" ] && ${CAT} <<EOF
+	    [ -n "${INSTALL_CERT_MODE}" ] && ${CAT} <<EOF
 	@${CHMOD} ${INSTALL_CERT_MODE} \$@
 EOF
-    [ -n "${INSTALL_CERT_OWNER}" ] && ${CAT} <<EOF
+	    [ -n "${INSTALL_CERT_OWNER}" ] && ${CAT} <<EOF
 	@${CHOWN} ${INSTALL_CERT_OWNER} \$@
 EOF
+	fi
     fi
 }
 
@@ -270,24 +292,44 @@ rule_private() {	## Create a make rule for private files
 	@${LN} -sf \${@F} ${DOMAIN_DIR}/.ssh/private-${sshtarget}
 	@${SCP} \$@ ${sshpath}
 EOF
-    [ -n "${INSTALL_KEY_MODE}" ] && ${CAT} <<EOF
+	[ -n "${INSTALL_KEY_MODE}" ] && ${CAT} <<EOF
 	@${CHMOD} ${INSTALL_KEY_MODE} \$@
 	@${SSH} ${sshhost} "${CHMOD} ${INSTALL_KEY_MODE} ${sshpath#*:}"
 EOF
     else
-	${CAT}<<EOF
+	if [[ "${!target:0:7}" == "docker:" ]] ; then
+	    local dctnpath=${!target:7}
+	    local dctnhost=${dctnpath%%:*}
+	    local dctntarget=${dctnpath##*/}
+	    ${CAT}<<EOF
+\${${target}}:	${deps}
+	@${MKDIR} -p \${@D}
+	@${ECHO} Installing ${!target:7}
+	@${ECHO} "## $desc" > \$@
+	@${ECHO} "## $(${DATE})" >> \$@
+	@${CAT} \$^ >> \$@
+	@${LN} -sf \${@F} ${DOMAIN_DIR}/.docker/private-${dctntarget}
+	@${DOCKER} cp \$@ ${dctnpath}
+EOF
+	    [ -n "${INSTALL_KEY_MODE}" ] && ${CAT} <<EOF
+	@${CHMOD} ${INSTALL_KEY_MODE} \$@
+	@${DOCKER} exec ${dctnhost} ${CHMOD} ${INSTALL_KEY_MODE} ${dctnpath#*:}
+EOF
+	else
+	    ${CAT}<<EOF
 \${${target}}:	${deps}
 	@${ECHO} Installing \$@
 	@${ECHO} "## $desc" > \$@
 	@${ECHO} "## $(${DATE})" >> \$@
 	@${CAT} \$^ >> \$@
 EOF
-    [ -n "${INSTALL_KEY_MODE}" ] && ${CAT} <<EOF
+	    [ -n "${INSTALL_KEY_MODE}" ] && ${CAT} <<EOF
 	@${CHMOD} ${INSTALL_KEY_MODE} \$@
 EOF
-    [ -n "${INSTALL_KEY_OWNER}" ] && ${CAT} <<EOF
+	    [ -n "${INSTALL_KEY_OWNER}" ] && ${CAT} <<EOF
 	@${CHOWN} ${INSTALL_KEY_OWNER} \$@
 EOF
+	fi
     fi
 }
 
@@ -509,7 +551,12 @@ do
 	md5=$(${ECHO} ${!loc}|${MD5SUM})
 	locs+=$(${ECHO} $loc=${DOMAIN_DIR}/.ssh/${md5:0:32} \# ${!loc##*:})
     else
-	locs+=$(${ECHO} $loc=${!loc})
+	if [ "${!loc:0:7}" == "docker:" ]; then
+	    md5=$(${ECHO} ${!loc}|${MD5SUM})
+	    locs+=$(${ECHO} $loc=${DOMAIN_DIR}/.docker/${md5:0:32} \# ${!loc##*:})
+	else
+	    locs+=$(${ECHO} $loc=${!loc})
+	fi
     fi
     # Command substitution $(foo ..) removes trailing newlines
     locs+=$(${PRINTF} "\nx"); locs=${locs%x} # Add and remove but newline
@@ -562,7 +609,9 @@ clean:
 		\${DOMAIN_TXTCERT_LOCATION} \\
 		\${DOMAIN_TXTKEY_LOCATION} \\
 		${DOMAIN_DIR}/.ssh/certs-* \\
-		${DOMAIN_DIR}/.ssh/private-*
+		${DOMAIN_DIR}/.ssh/private-* \\
+		${DOMAIN_DIR}/.docker/certs-* \\
+		${DOMAIN_DIR}/.docker/private-*
 
 # Rules
 ${rules}
