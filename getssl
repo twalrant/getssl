@@ -188,6 +188,7 @@
 # 2018-01-17 add generation of DHPARAM (2.10.2)
 # 2018-04-01 add missing installation of DHPARAM (2.10.3)
 # 2019-05-01 add _FORCE_INSTALL (2.10.4)
+# 2019-11-03 add SKIP_RENEWAL (2.10.5)
 # ----------------------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
@@ -1678,6 +1679,11 @@ set_server_type
 
 # check config for typical errors.
 check_config
+
+if [[ -e "$DOMAIN_DIR/SKIP_RENEWAL" ]]; then
+  info "${DOMAIN}: skipping renewal (due to SKIP_RENEWAL file)"
+  graceful_exit
+fi
 
 if [[ -e "$DOMAIN_DIR/FORCE_RENEWAL" ]]; then
   rm -f "$DOMAIN_DIR/FORCE_RENEWAL" || error_exit "problem deleting file $DOMAIN_DIR/FORCE_RENEWAL"
