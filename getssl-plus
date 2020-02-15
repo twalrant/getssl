@@ -1,0 +1,290 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# getssl-plus - superset utility of GetSSL - handle DHPARAMS
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+# For usage, run "getssl-plus -h"
+
+# Revision history:
+# 2020-02-15 Created (v0.1)
+#
+# -----------------------------------------------------------------------------
+
+PROGNAME=${0##*/}
+VERSION="0.01"
+
+# defaults
+DOMAIN=
+DOMAIN_DHPARAM_LEN=
+REUSE_DHPARAM="true"
+ORIG_CMD=$(readlink -f $0)
+ORIG_UMASK_CMD=$(umask -p)	# bash command
+WORKING_DIR=~/.getssl
+
+_CHECK_ALL=0
+_QUIET=0
+_USE_DEBUG=0
+
+## Commands fullpath
+CAT=/bin/cat
+CHMOD=/bin/chmod
+DATE=/bin/date
+ECHO=/bin/echo
+GREP=/bin/grep
+OPENSSL=/usr/bin/openssl
+UNAME=/bin/uname
+
+# Define all functions (in alphabetical order)
+
+check_config() { # check the config files for all obvious errors
+    local config_errors=false
+
+    debug "checking config"
+
+    if [[ "${config_errors}" == "true" ]]; then
+        error_exit "${DOMAIN}: exiting due to config errors"
+    fi
+    debug "${DOMAIN}: check_config completed  - all OK"
+}
+
+clean_up() { # Perform pre-exit housekeeping
+    ${ORIG_UMASK_CMD}
+}
+
+create_dhparam() { # create a domain dh parameter file (if it doesn't already exist)
+    local dhparam_loc=$1 # domain dhparam file location
+    local dhparam_len=$2 # domain dhparam numbits
+    # check if key exists, if not then create it.
+    if [[ -s "${dhparam_loc}" ]]; then
+	debug "domain dhparam exists at ${dhparam_loc} - skipping generation"
+	# ideally need to check validity of domain dhparam
+	${CHMOD} 600 "${dhparam_loc}"
+    else
+	umask 077
+	info "creating dhparam - ${dhparam_loc}"
+	${OPENSSL} dhparam -out ${dhparam_loc} ${dhparam_len}
+	umask "$ORIG_UMASK"
+    fi
+}
+
+debug() { # write out debug info if the debug flag has been set
+    if [[ ${_USE_DEBUG} -eq 1 ]]; then
+        ${ECHO} ""
+        ${ECHO} "$@"
+    fi
+}
+
+error_exit() { # give error message on error exit
+    ${ECHO} -e "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+    clean_up
+    exit 1
+}
+
+get_os() { # function to get the current Operating System
+    local uname_res=$(${UNAME} -s)
+    if [[ $(${DATE} -h 2>&1 | ${GREP} -ic busybox) -gt 0 ]]; then
+	os="busybox"
+    elif [[ ${uname_res} == "Linux" ]]; then
+	os="linux"
+    elif [[ ${uname_res} == "FreeBSD" ]]; then
+	os="bsd"
+    elif [[ ${uname_res} == "Darwin" ]]; then
+	os="mac"
+    elif [[ ${uname_res:0:6} == "CYGWIN" ]]; then
+	os="cygwin"
+    elif [[ ${uname_res:0:5} == "MINGW" ]]; then
+	os="mingw"
+    else
+	os="unknown"
+    fi
+    debug "detected os type = $os"
+}
+
+graceful_exit() { # normal exit function.
+    clean_up
+    exit
+}
+
+info() { # write out info as long as the quiet flag has not been set.
+    if [[ ${_QUIET} -eq 0 ]]; then
+        ${ECHO} "$@"
+    fi
+}
+
+load_commands() { # load command full path
+    local file=$(dirname $0)/commands/${os}
+    if [[ -f ${file} ]]; then
+	. ${file}
+    fi
+}
+
+signal_exit() { # Handle trapped signals
+    case $1 in
+        INT)
+            error_exit "Program interrupted by user" ;;
+        TERM)
+            echo -e "\n$PROGNAME: Program terminated" >&2
+            graceful_exit ;;
+        *)
+            error_exit "$PROGNAME: Terminating on unknown signal" ;;
+    esac
+}
+
+help_message() { # print out the help message
+    ${CAT} <<- _EOF_
+	${PROGNAME} ver. ${VERSION}
+	Perform additional operations not covered by getssl
+
+	$(usage)
+
+	Options:
+	  -h, --help             Display this help message and exit
+	  -a, --all              Check all certificates
+	  -d, --debug            Outputs debug information
+	  -w, --working_dir DIR  Working directory
+	  -q, --quiet            Quiet mode (only outputs on error)
+
+_EOF_
+}
+
+usage() { # echos out the program usage
+    ${ECHO} "Usage: $PROGNAME [-h|--help] [-a|--all]" \
+	    "[-w working_dir] [-q|--quiet] [-d|--debug] domain"
+}
+
+# -----------------------------------------------------------------------------
+# Main logic
+
+# Get the current OS, so the correct functions can be used for that
+# OS. (sets the variable os)
+get_os
+
+# Load commands
+load_commands
+
+# Trap signals
+trap "signal_exit TERM" TERM HUP
+trap "signal_exit INT"  INT
+
+# Parse command-line
+while [[ -n ${1} ]]; do
+    case $1 in
+        -h | --help)
+            help_message; graceful_exit ;;
+        -d | --debug)
+            ORIG_CMD+=" -d"
+            INSTALL+=" -v"
+            _USE_DEBUG=1 ;;
+        -q | --quiet)
+            ORIG_CMD+=" -q"
+            _QUIET=1 ;;
+        -a | --all)
+            _CHECK_ALL=1 ;;
+        -w | --working_dir)
+            shift; WORKING_DIR="$1" ;;
+        -* | --*)
+            usage
+            error_exit "Unknown option $1" ;;
+        *)
+            if [[ -n $DOMAIN ]]; then
+                error_exit "invalid command line $DOMAIN - it appears to contain more than one domain"
+            fi
+            DOMAIN="$1"
+	    DEFAULT_TEXT="$1"
+            if [[ -z $DOMAIN ]]; then
+                error_exit "invalid command line - it appears to contain a null variable"
+            fi ;;
+    esac
+    shift
+done
+
+# if nothing in command line, print help and exit.
+if [[ -z "${DOMAIN}" ]] && [[ ${_CHECK_ALL} -ne 1 ]]; then
+    help_message
+    graceful_exit
+fi
+
+# check if the "working directory" exist.
+if [[ ! -d "${WORKING_DIR}" ]]; then
+    error_exit "Working directory not found: ${WORKING_DIR}"
+fi
+
+# read any variables from config in working directory
+if [[ -s "${WORKING_DIR}/getssl.cfg" ]]; then
+    debug "reading config from ${WORKING_DIR}/getssl.cfg"
+		# shellcheck source=/dev/null
+    . "${WORKING_DIR}/getssl.cfg"
+fi
+
+# Define defaults for variables not set in the main config.
+DOMAIN_STORAGE="${DOMAIN_STORAGE:=${WORKING_DIR}}"
+DOMAIN_DIR="${DOMAIN_STORAGE}/${DOMAIN}"
+
+# if "-a" option then check other parameters and create run for each domain.
+if [[ ${_CHECK_ALL} -eq 1 ]]; then
+    info "Process all certificates"
+
+    if [[ ! -d "${DOMAIN_STORAGE}" ]]; then
+        error_exit "DOMAIN_STORAGE not found  - ${DOMAIN_STORAGE}"
+    fi
+
+    for dir in ${DOMAIN_STORAGE}/*; do
+        if [[ -d "${dir}" ]]; then
+            debug "Checking ${dir}"
+	    # check if $dir is a directory with a getssl.cfg in it
+	    if [[ -f "$dir/getssl.cfg" ]]; then
+                cmd="${ORIG_CMD} -w ${WORKING_DIR} "$(basename "${dir}")
+                debug "CMD: ${cmd}"
+                eval "${cmd}"
+            fi
+        fi
+    done
+
+    graceful_exit
+fi
+# end of "-a" option (looping through all domains)
+
+# check if the "domain directory" exist.
+if [[ ! -d "${DOMAIN_DIR}" ]]; then
+    error_exit "DOMAIN not found: ${DOMAIN_DIR##*/}"
+fi
+
+# read any variables from config in domain directory
+if [[ -s "${DOMAIN_DIR}/getssl.cfg" ]]; then
+  debug "reading config from ${DOMAIN_DIR}/getssl.cfg"
+  # shellcheck source=/dev/null
+  . "${DOMAIN_DIR}/getssl.cfg"
+fi
+
+# Define defaults for variables not set in the domain config.
+DH_FILE="${DOMAIN_DIR}/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}"
+
+# check config for typical errors.
+check_config
+
+# if not reusing dhparam, then remove the old files
+if [[ "$REUSE_DHPARAM" != "true" ]]; then
+    if [[ -s "${DH_FILE}" ]]; then
+	rm -f "${DH_FILE}"
+    fi
+fi
+# create new domain dhparam if they don't already exist
+if [[ -n "${DOMAIN_DHPARAM_LEN}" ]]; then
+    create_dhparam "${DH_FILE}" "${DOMAIN_DHPARAM_LEN}"
+fi
+# End of creating domain dhparam
+
+# gracefully exit ( tidying up temporary files etc).
+graceful_exit
+
+# End of file: getssl-plus
