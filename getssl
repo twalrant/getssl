@@ -2283,6 +2283,11 @@ set_server_type
 # check config for typical errors.
 check_config
 
+if [[ -e "$DOMAIN_DIR/SKIP_RENEWAL" ]]; then
+  info "${DOMAIN}: skipping renewal (due to SKIP_RENEWAL file)"
+  graceful_exit
+fi
+
 if [[ -e "$DOMAIN_DIR/FORCE_RENEWAL" ]]; then
   rm -f "$DOMAIN_DIR/FORCE_RENEWAL" || error_exit "problem deleting file $DOMAIN_DIR/FORCE_RENEWAL"
   _FORCE_RENEW=1
