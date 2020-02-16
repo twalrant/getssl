@@ -34,6 +34,7 @@ WORKING_DIR=~/.getssl
 _CHECK_ALL=0
 _QUIET=0
 _USE_DEBUG=0
+_FORCE_RENEW=0
 
 ## Commands fullpath
 CAT=/bin/cat
@@ -43,6 +44,7 @@ ECHO=/bin/echo
 GREP=/bin/grep
 OPENSSL=/usr/bin/openssl
 UNAME=/bin/uname
+UMASK=umask	# bash command
 
 # Define all functions (in alphabetical order)
 
@@ -70,10 +72,10 @@ create_dhparam() { # create a domain dh parameter file (if it doesn't already ex
 	# ideally need to check validity of domain dhparam
 	${CHMOD} 600 "${dhparam_loc}"
     else
-	umask 077
+	${UMASK} 077
 	info "creating dhparam - ${dhparam_loc}"
 	${OPENSSL} dhparam -out ${dhparam_loc} ${dhparam_len}
-	umask "$ORIG_UMASK"
+	${ORIG_UMASK_CMD}
     fi
 }
 
@@ -151,6 +153,7 @@ help_message() { # print out the help message
 	  -h, --help             Display this help message and exit
 	  -a, --all              Check all certificates
 	  -d, --debug            Outputs debug information
+	  -f, --force            Force renewal of dhparam
 	  -w, --working_dir DIR  Working directory
 	  -q, --quiet            Quiet mode (only outputs on error)
 
@@ -158,8 +161,8 @@ _EOF_
 }
 
 usage() { # echos out the program usage
-    ${ECHO} "Usage: $PROGNAME [-h|--help] [-a|--all]" \
-	    "[-w working_dir] [-q|--quiet] [-d|--debug] domain"
+    ${ECHO} "Usage: $PROGNAME [-h|--help] [-a|--all] [-f|--force]" \
+	    " [-w working_dir] [-q|--quiet] [-d|--debug] domain"
 }
 
 # -----------------------------------------------------------------------------
@@ -183,8 +186,9 @@ while [[ -n ${1} ]]; do
             help_message; graceful_exit ;;
         -d | --debug)
             ORIG_CMD+=" -d"
-            INSTALL+=" -v"
             _USE_DEBUG=1 ;;
+        -f | --force)
+            _FORCE_RENEW=1 ;;
         -q | --quiet)
             ORIG_CMD+=" -q"
             _QUIET=1 ;;
@@ -273,7 +277,7 @@ DH_FILE="${DOMAIN_DIR}/${DOMAIN}.dh${DOMAIN_DHPARAM_LEN}"
 check_config
 
 # if not reusing dhparam, then remove the old files
-if [[ "$REUSE_DHPARAM" != "true" ]]; then
+if [[ "$REUSE_DHPARAM" != "true" ]] || [[ $_FORCE_RENEW -eq 1 ]]; then
     if [[ -s "${DH_FILE}" ]]; then
 	rm -f "${DH_FILE}"
     fi
