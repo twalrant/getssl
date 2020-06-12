@@ -1,0 +1,16 @@
+#!/bin/bash
+#
+VERSION_CUR=$(awk -F '"' '$1 == "VERSION=" {print $2}' getssl)
+
+./getssl -u >/dev/null
+
+VERSION_NEW=$(awk -F '"' '$1 == "VERSION=" {print $2}' getssl)
+echo "Current version: "${VERSION_CUR}
+if [ "${VERSION_NEW}" != "${VERSION_CUR}" ];
+then
+    echo "Updated version: "${VERSION_NEW}
+    test -f getssl-v${VERSION_CUR}.cust || \
+	cp getssl getssl-v${VERSION_CUR}.cust
+    test -f getssl-v${VERSION_NEW} || \
+	cp getssl getssl-v${VERSION_NEW}
+fi
