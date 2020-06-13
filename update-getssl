@@ -1,16 +1,40 @@
 #!/bin/bash
 #
 VERSION_CUR=$(awk -F '"' '$1 == "VERSION=" {print $2}' getssl)
+echo "Current version: "${VERSION_CUR}
 
+# Keep copy of the custom version
+test -f getssl-v${VERSION_CUR}.cust ||
+    cp getssl getssl-v${VERSION_CUR}.cust
+
+# Attempt an update
 ./getssl -u >/dev/null
 
 VERSION_NEW=$(awk -F '"' '$1 == "VERSION=" {print $2}' getssl)
-echo "Current version: "${VERSION_CUR}
+
 if [ "${VERSION_NEW}" != "${VERSION_CUR}" ];
 then
-    echo "Updated version: "${VERSION_NEW}
-    test -f getssl-v${VERSION_CUR}.cust || \
-	cp getssl getssl-v${VERSION_CUR}.cust
+    echo "New version:     "${VERSION_NEW}
+
+    # Keep copy of the original new version
     test -f getssl-v${VERSION_NEW} || \
 	cp getssl getssl-v${VERSION_NEW}
+
+    # Apply patch from current/previous version
+    if [ -f getssl-v${VERSION_CUR}.patch ];
+    then
+	echo "Applying patch to getssl v${VERSION_NEW}..."
+	patch getssl getssl-v${VERSION_CUR}.patch
+	if [ $? -ne 0 ];
+	then
+	    echo "Patching getssl v${VERSION_NEW} failed!" 
+	else
+	    # Keep copy of the new custom version
+	    cp getssl getssl-v${VERSION_NEW}.cust
+
+	    # Create new patch file
+	    echo "Creating patch for getssl v${VERSION_NEW}..."
+	    diff -u getssl-v${VERSION_NEW} getssl > getssl-v${VERSION_NEW}.patch
+	fi
+    fi
 fi
