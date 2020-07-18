@@ -37,4 +37,11 @@ then
 	    diff -u getssl-v${VERSION_NEW} getssl > getssl-v${VERSION_NEW}.patch
 	fi
     fi
+else
+    if ! [ -f getssl-v${VERSION_NEW}.patch ];
+    then
+	# Create new patch file
+	echo "Creating patch for getssl v${VERSION_NEW}..."
+	diff -u getssl-v${VERSION_NEW} getssl > getssl-v${VERSION_NEW}.patch
+    fi
 fi
