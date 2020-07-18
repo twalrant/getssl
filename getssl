@@ -231,11 +231,14 @@
 # 2020-05-06 Fix missing fullchain.ec.crt when creating dual certificates (2.27)
 # 2020-05-14 Add --notify-valid option (exit 2 if certificate is valid)
 # 2020-05-23 Fix --revoke (didn't work with ACMEv02) (2.28)
+# 2020-06-06 Fix missing URL_revoke definition when no CA directory suffix (#566)
+# 2020-06-18 Fix CHECK_REMOTE for DUAL_RSA_ECDSA (#570)
+# 2020-07-14 Support space separated SANS (#574) (2.29)
 # ----------------------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
 PROGDIR="$(cd "$(dirname "$0")" || exit; pwd -P;)"
-VERSION="2.28"
+VERSION="2.29"
 
 # defaults
 ACCOUNT_KEY_LENGTH=4096
@@ -499,7 +502,7 @@ check_config() { # check the config files for all obvious errors
 
   # get all domains
   if [[ "$IGNORE_DIRECTORY_DOMAIN" == "true" ]]; then
-    alldomains=${SANS//,/ }
+    alldomains=${SANS//[, ]/ }
   else
     alldomains=$(echo "$DOMAIN,$SANS" | sed "s/,/ /g")
   fi
@@ -786,7 +789,7 @@ create_csr() { # create a csr using a given key (if it doesn't already exist)
     if [[ "$IGNORE_DIRECTORY_DOMAIN" == "true" ]]; then
       alldomains=$(echo "$SANS" | sed -e 's/ //g; s/,$//; y/,/\n/' | sort -u)
     else
-      alldomains=$(echo "$DOMAIN,$SANS" | sed -e 's/ //g; s/,$//; y/,/\n/' | sort -u)
+      alldomains=$(echo "$DOMAIN,$SANS" | sed -e 's/,/ /g; s/ $//; y/ /\n/' | sort -u)
     fi
     domains_in_csr=$(openssl req -text -noout -in "$csr_file" \
         | sed -n -e 's/^ *Subject: .* CN=\([A-Za-z0-9.-]*\).*$/\1/p; /^ *DNS:.../ { s/ *DNS://g; y/,/\n/; p; }' \
@@ -2582,9 +2585,15 @@ fi
 # if check_remote is true then connect and obtain the current certificate (if not forcing renewal)
 if [[ "${CHECK_REMOTE}" == "true" ]] && [[ $_FORCE_RENEW -eq 0 ]]; then
   debug "getting certificate for $DOMAIN from remote server"
+if [[ "$DUAL_RSA_ECDSA" == "true" ]]; then
+    CIPHER="-cipher RSA"
+else
+    CIPHER=""
+fi
+  # twa-diff: adding ${SERVER_PREFIX} to openssl s_client -connect
   # shellcheck disable=SC2086
   EX_CERT=$(echo \
-    | openssl s_client -servername "${DOMAIN}" -connect "${SERVER_PREFIX}${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} 2>/dev/null \
+    | openssl s_client -servername "${DOMAIN}" -connect "${SERVER_PREFIX}${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} ${CIPHER} 2>/dev/null \
     | openssl x509 2>/dev/null)
   if [[ -n "$EX_CERT" ]]; then # if obtained a cert
     if [[ -s "$CERT_FILE" ]]; then # if local exists
@@ -2711,9 +2720,9 @@ fi
 if [[ -z "$SANS" ]]; then
   SANLIST="subjectAltName=DNS:${DOMAIN}"
 elif [[ "$IGNORE_DIRECTORY_DOMAIN" == "true" ]]; then
-  SANLIST="subjectAltName=DNS:${SANS//,/,DNS:}"
+  SANLIST="subjectAltName=DNS:${SANS//[, ]/,DNS:}"
 else
-  SANLIST="subjectAltName=DNS:${DOMAIN},DNS:${SANS//,/,DNS:}"
+  SANLIST="subjectAltName=DNS:${DOMAIN},DNS:${SANS//[, ]/,DNS:}"
 fi
 debug "created SAN list = $SANLIST"
 
@@ -2773,7 +2782,7 @@ info "Verify each domain"
 
 # loop through domains for cert ( from SANS list)
 if [[ "$IGNORE_DIRECTORY_DOMAIN" == "true" ]]; then
-  alldomains=${SANS//,/ }
+  alldomains=${SANS//[, ]/ }
 else
   alldomains=$(echo "$DOMAIN,$SANS" | sed "s/,/ /g")
 fi
@@ -2843,16 +2852,31 @@ fi
 # Check if the certificate is installed correctly
 if [[ ${CHECK_REMOTE} == "true" ]]; then
   sleep "$CHECK_REMOTE_WAIT"
-  # shellcheck disable=SC2086
-  CERT_REMOTE=$(echo \
-    | openssl s_client -servername "${DOMAIN}" -connect "${SERVER_PREFIX}${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} 2>/dev/null \
-    | openssl x509 -noout -fingerprint 2>/dev/null)
-  CERT_LOCAL=$(openssl x509 -noout -fingerprint < "$CERT_FILE" 2>/dev/null)
-  if [[ "$CERT_LOCAL" == "$CERT_REMOTE" ]]; then
-    info "${DOMAIN} - certificate installed OK on server"
+  if [[ "$DUAL_RSA_ECDSA" == "true" ]]; then
+    PARAMS=("-cipher RSA" "-cipher ECDSA")
+    CERTS=("$CERT_FILE" "${CERT_FILE%.*}.ec.crt")
+    TYPES=("rsa" "$PRIVATE_KEY_ALG")
   else
-    error_exit "${DOMAIN} - certificate obtained but certificate on server is different from the new certificate"
+    PARAMS=("")
+    CERTS=("$CERT_FILE")
+    TYPES=("$PRIVATE_KEY_ALG")
   fi
+
+  for ((i=0; i<${#PARAMS[@]};++i)); do
+    debug "Checking ${CERTS[i]}"
+    # twa-diff: adding ${SERVER_PREFIX} to openssl s_client -connect
+    # shellcheck disable=SC2086
+    CERT_REMOTE=$(echo \
+        | openssl s_client -servername "${DOMAIN}" -connect "${SERVER_PREFIX}${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} ${PARAMS[i]} 2>/dev/null \
+        | openssl x509 -noout -fingerprint 2>/dev/null)
+    CERT_LOCAL=$(openssl x509 -noout -fingerprint < "${CERTS[i]}" 2>/dev/null)
+    if [[ "$CERT_LOCAL" == "$CERT_REMOTE" ]]; then
+        info "${DOMAIN} - ${TYPES[i]} certificate installed OK on server"
+    else
+        info "${CERTS[i]} didn't match server"
+        error_exit "${DOMAIN} - ${TYPES[i]} certificate obtained but certificate on server is different from the new certificate"
+    fi
+  done
 fi
 # end of Check if the certificate is installed correctly
 
