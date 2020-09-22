@@ -40,6 +40,9 @@ then
 else
     if ! [ -f getssl-v${VERSION_NEW}.patch ];
     then
+	# Keep copy of the new custom version
+	cp getssl getssl-v${VERSION_NEW}.cust
+
 	# Create new patch file
 	echo "Creating patch for getssl v${VERSION_NEW}..."
 	diff -u getssl-v${VERSION_NEW} getssl > getssl-v${VERSION_NEW}.patch
