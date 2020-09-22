@@ -234,11 +234,15 @@
 # 2020-06-06 Fix missing URL_revoke definition when no CA directory suffix (#566)
 # 2020-06-18 Fix CHECK_REMOTE for DUAL_RSA_ECDSA (#570)
 # 2020-07-14 Support space separated SANS (#574) (2.29)
+# 2020-08-06 Use -sigalgs instead of -cipher when checking remote for tls1.3 (#570)
+# 2020-08-31 Fix slow fork bomb when directory containing getssl isn't writeable (#440)
+# 2020-09-01 Use RSA-PSS when checking remote for DUAL_RSA_ECDSA (#570)
+# 2020-09-02 Fix issue when SANS is space and comma separated (#579)
 # ----------------------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
 PROGDIR="$(cd "$(dirname "$0")" || exit; pwd -P;)"
-VERSION="2.29"
+VERSION="2.30"
 
 # defaults
 ACCOUNT_KEY_LENGTH=4096
@@ -254,8 +258,10 @@ CSR_SUBJECT="/"
 CURL_USERAGENT="${PROGNAME}/${VERSION}"
 DEACTIVATE_AUTH="false"
 DEFAULT_REVOKE_CA="https://acme-v02.api.letsencrypt.org"
-DNS_EXTRA_WAIT=60
-DNS_WAIT=10
+DNS_EXTRA_WAIT=60          # How long to wait after the DNS has updated before telling the ACME server to check.
+DNS_WAIT_RETRY_ADD="false" # Try the dns_add_command again if the DNS record hasn't updated
+DNS_WAIT=10                # How long to wait before checking the DNS record again
+DNS_WAIT_COUNT=100         # How many times to wait for the DNS record to update
 DOMAIN_KEY_LENGTH=4096
 DUAL_RSA_ECDSA="false"
 GETSSL_IGNORE_CP_PRESERVE="false"
@@ -452,6 +458,7 @@ check_challenge_completion() { # checks with the ACME server if our challenge is
     # if ACME response is that their check gave an invalid response, error exit
     if [[ "$status" == "invalid" ]] ; then
       err_detail=$(echo "$response" | grep "detail")
+      #! FIXME need to check for "DNS problem: SERVFAIL looking up CAA ..." and retry
       error_exit "$domain:Verify error:$err_detail"
     fi
 
@@ -610,8 +617,12 @@ check_getssl_upgrade() { # check if a more recent version of code is available a
   # use a default of 0 for cases where the latest code has not been obtained.
   if [[ "${latestvdec:-0}" -gt "$localvdec" ]]; then
     if [[ ${_UPGRADE} -eq 1 ]]; then
-      install "$0" "${0}.v${VERSION}"
-      install -m 700 "$TEMP_UPGRADE_FILE" "$0"
+      if ! install "$0" "${0}.v${VERSION}"; then
+	 error_exit "problem renaming old version while updating, check permissions"
+      fi
+      if ! install -m 700 "$TEMP_UPGRADE_FILE" "$0"; then
+	 error_exit "problem installing new version while updating, check permissions"
+      fi
       if [[ ${_MUTE} -eq 0 ]]; then
         echo "Updated getssl from v${VERSION} to v${latestversion}"
         echo "these update notification can be turned off using the -Q option"
@@ -1181,13 +1192,29 @@ if [[ $VALIDATE_VIA_DNS == "true" ]]; then
           if [[ "$check_result" == *"$auth_key"* ]]; then
             check_dns="success"
           else
-            if [[ $ntries -lt 100 ]]; then
+            if [[ $ntries -lt $DNS_WAIT_COUNT ]]; then
               ntries=$(( ntries + 1 ))
+
+              if [[ $DNS_WAIT_RETRY_ADD == "true" && $(( ntries % 10 == 0 )) ]]; then
+                # shellcheck disable=SC2018,SC2019
+                lower_d=$(echo "$d" | tr A-Z a-z)
+                debug "Retrying adding dns via command: $DNS_ADD_COMMAND $lower_d $auth_key"
+                if ! eval "$DNS_ADD_COMMAND" "$lower_d" "$auth_key" ; then
+                  error_exit "DNS_ADD_COMMAND failed for domain $d"
+                fi
+
+              fi
               info "checking DNS at ${ns} for ${d}. Attempt $ntries/100 gave wrong result, "\
                 "waiting $DNS_WAIT secs before checking again"
               sleep $DNS_WAIT
             else
               debug "dns check failed - removing existing value"
+              # shellcheck disable=SC2018,SC2019
+              lower_d=$(echo "$d" | tr A-Z a-z)
+              eval "$DNS_DEL_COMMAND" "$lower_d" "$auth_key"
+              # remove $dnsfile after each loop.
+              rm -f "$dnsfile"
+
               error_exit "checking _acme-challenge.${d} gave $check_result not $auth_key"
             fi
           fi
@@ -1229,6 +1256,7 @@ get_auth_dns() { # get the authoritative dns server for a domain (sets primary_n
 
   if [[ "$os" == "cygwin" ]]; then
     gad_d="$orig_gad_d"
+    # shellcheck disable=SC2086
     all_auth_dns_servers=$(nslookup -type=soa "${d}" ${PUBLIC_DNS_SERVER} 2>/dev/null \
                           | grep "primary name server" \
                           | awk '{print $NF}')
@@ -1308,6 +1336,7 @@ get_auth_dns() { # get the authoritative dns server for a domain (sets primary_n
   if [[ "$HAS_NSLOOKUP" == "true" ]]; then
     gad_d="$orig_gad_d"
     debug Using "nslookup -debug -type=soa -type=ns $gad_d $gad_s" to find primary name server
+    # shellcheck disable=SC2086
     res=$(nslookup -debug -type=soa -type=ns "$gad_d" ${gad_s})
 
     if [[ "$(echo "$res" | grep -c "Non-authoritative")" -gt 0 ]]; then
@@ -2535,6 +2564,10 @@ if [[ -s "$DOMAIN_DIR/getssl.cfg" ]]; then
   . "$DOMAIN_DIR/getssl.cfg"
 fi
 
+# Ensure SANS is comma separated by replacing any number of commas or spaces with a single comma
+# shellcheck disable=SC2001
+SANS=$(echo "$SANS" | sed 's/[, ]\+/,/g')
+
 # from SERVER_TYPE set REMOTE_PORT and REMOTE_EXTRA
 set_server_type
 
@@ -2585,12 +2618,18 @@ fi
 # if check_remote is true then connect and obtain the current certificate (if not forcing renewal)
 if [[ "${CHECK_REMOTE}" == "true" ]] && [[ $_FORCE_RENEW -eq 0 ]]; then
   debug "getting certificate for $DOMAIN from remote server"
-if [[ "$DUAL_RSA_ECDSA" == "true" ]]; then
-    CIPHER="-cipher RSA"
-else
+  if [[ "$DUAL_RSA_ECDSA" == "true" ]]; then
+    # shellcheck disable=SC2086
+    # check if openssl supports RSA-PSS
+    if [[ $(echo | openssl s_client -servername "${DOMAIN}" -connect "${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} -sigalgs RSA-PSS+SHA256 2>/dev/null) ]]; then
+        CIPHER="-sigalgs RSA+SHA256:RSA+SHA384:RSA+SHA512:RSA-PSS+SHA256:RSA-PSS+SHA512"
+    else
+        CIPHER="-sigalgs RSA+SHA256:RSA+SHA384:RSA+SHA512"
+    fi
+  else
     CIPHER=""
-fi
-  # twa-diff: adding ${SERVER_PREFIX} to openssl s_client -connect
+  fi
+  # twa-diff: adding(1) ${SERVER_PREFIX} to openssl s_client -connect
   # shellcheck disable=SC2086
   EX_CERT=$(echo \
     | openssl s_client -servername "${DOMAIN}" -connect "${SERVER_PREFIX}${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} ${CIPHER} 2>/dev/null \
@@ -2853,7 +2892,14 @@ fi
 if [[ ${CHECK_REMOTE} == "true" ]]; then
   sleep "$CHECK_REMOTE_WAIT"
   if [[ "$DUAL_RSA_ECDSA" == "true" ]]; then
-    PARAMS=("-cipher RSA" "-cipher ECDSA")
+    # shellcheck disable=SC2086
+    # check if openssl supports RSA-PSS
+    if [[ $(echo | openssl s_client -servername "${DOMAIN}" -connect "${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} -sigalgs RSA-PSS+SHA256 2>/dev/null) ]]; then
+        PARAMS=("-sigalgs RSA-PSS+SHA256:RSA-PSS+SHA512:RSA+SHA256:RSA+SHA384:RSA+SHA512" "-sigalgs ECDSA+SHA256:ECDSA+SHA384:ECDSA+SHA512")
+    else
+        PARAMS=("-sigalgs RSA+SHA256:RSA+SHA384:RSA+SHA512" "-sigalgs ECDSA+SHA256:ECDSA+SHA384:ECDSA+SHA512")
+    fi
+
     CERTS=("$CERT_FILE" "${CERT_FILE%.*}.ec.crt")
     TYPES=("rsa" "$PRIVATE_KEY_ALG")
   else
@@ -2864,14 +2910,19 @@ if [[ ${CHECK_REMOTE} == "true" ]]; then
 
   for ((i=0; i<${#PARAMS[@]};++i)); do
     debug "Checking ${CERTS[i]}"
-    # twa-diff: adding ${SERVER_PREFIX} to openssl s_client -connect
+    # twa-diff: adding(2) ${SERVER_PREFIX} to openssl s_client -connect
     # shellcheck disable=SC2086
     CERT_REMOTE=$(echo \
         | openssl s_client -servername "${DOMAIN}" -connect "${SERVER_PREFIX}${DOMAIN}:${REMOTE_PORT}" ${REMOTE_EXTRA} ${PARAMS[i]} 2>/dev/null \
         | openssl x509 -noout -fingerprint 2>/dev/null)
     CERT_LOCAL=$(openssl x509 -noout -fingerprint < "${CERTS[i]}" 2>/dev/null)
+    debug CERT_LOCAL="${CERT_LOCAL}"
+    debug CERT_REMOTE="${CERT_REMOTE}"
     if [[ "$CERT_LOCAL" == "$CERT_REMOTE" ]]; then
         info "${DOMAIN} - ${TYPES[i]} certificate installed OK on server"
+    elif [[ "$CERT_REMOTE" == "" ]]; then
+        info "${CERTS[i]} not returned by server"
+        error_exit "${DOMAIN} - ${TYPES[i]} certificate obtained but not installed on server"
     else
         info "${CERTS[i]} didn't match server"
         error_exit "${DOMAIN} - ${TYPES[i]} certificate obtained but certificate on server is different from the new certificate"
